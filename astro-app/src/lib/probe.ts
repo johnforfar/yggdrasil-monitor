@@ -30,6 +30,11 @@ export const DOMAINS: DomainConfig[] = [
   { name: "v10.build.openmesh.cloud", category: "direct" },
 ];
 
+// Allow-list used by the read APIs to filter out historical probes for
+// domains no longer in the active set (the JSONL file is append-only and
+// retains rows from earlier configurations).
+export const ACTIVE_DOMAINS: Set<string> = new Set(DOMAINS.map((d) => d.name));
+
 const RESOLVERS: { name: string; servers: string[] }[] = [
   { name: "1.1.1.1", servers: ["1.1.1.1"] },
   { name: "8.8.8.8", servers: ["8.8.8.8"] },

@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { tail } from "../../lib/store.ts";
+import { ACTIVE_DOMAINS } from "../../lib/probe.ts";
 
 export const prerender = false;
 
@@ -36,7 +37,7 @@ export const GET: APIRoute = async ({ url }) => {
   const sinceIso = new Date(since).toISOString().slice(0, 19) + "Z";
   const bucketMs = (hours * 3600 * 1000) / bucketsCount;
 
-  const probes = await tail(16 * 1024 * 1024, (p: any) => p.ts >= sinceIso);
+  const probes = await tail(16 * 1024 * 1024, (p: any) => p.ts >= sinceIso && ACTIVE_DOMAINS.has(p.domain));
 
   // Map<key, Array<{sum_ms,n,bad_n}>>
   type Bin = { sum_ms: number; n: number; bad_n: number };

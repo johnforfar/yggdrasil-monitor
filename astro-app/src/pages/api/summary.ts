@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { tail } from "../../lib/store.ts";
+import { ACTIVE_DOMAINS } from "../../lib/probe.ts";
 
 export const prerender = false;
 
@@ -41,7 +42,7 @@ export const GET: APIRoute = async () => {
   type Acc = Bucket & { _msSum: number; _streakStart: string | null };
   const buckets = new Map<string, Acc>();
 
-  const probes = await tail(8 * 1024 * 1024, (p: any) => p.ts >= sinceIso);
+  const probes = await tail(8 * 1024 * 1024, (p: any) => p.ts >= sinceIso && ACTIVE_DOMAINS.has(p.domain));
   for (const p of probes as any[]) {
     const key = `${p.domain}::${p.layer}`;
     let b = buckets.get(key);

@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { tail } from "../../lib/store.ts";
+import { ACTIVE_DOMAINS } from "../../lib/probe.ts";
 
 export const prerender = false;
 
@@ -31,6 +32,7 @@ export const GET: APIRoute = async ({ url }) => {
 
   const probes = await tail(4 * 1024 * 1024, (p: any) => {
     if (p.ts < sinceIso) return false;
+    if (!ACTIVE_DOMAINS.has(p.domain)) return false;
     if (domain && p.domain !== domain) return false;
     if (layer && p.layer !== layer) return false;
     return true;
