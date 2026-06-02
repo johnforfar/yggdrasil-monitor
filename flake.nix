@@ -36,12 +36,16 @@
       in
       {
         config = {
-          # Satisfy the `xnode.xnode-config` option that the xnodeos modules
-          # (transitively imported by the xnode-manager container module) demand.
-          # The xnode-manager wrapper sets `services.xnode-container.xnode-config`
-          # but NOT the older top-level `xnode.xnode-config`. Without this line
-          # every fresh deploy fails with "xnode.xnode-config has no value defined".
-          xnode.xnode-config = ./xnode-config;
+          # Canonical container-wrapper overrides per
+          # ENGINEERING/2026-05-27_CONTAINER-MIGRATION-SESSION.md §2:
+          # xnode-manager 1.0.1's auto-generated wrapper sets
+          # `services.xnode-container.xnode-config` but NOT the older
+          # `xnode.xnode-config` that `xnodeos.nixosModules.app` reads at eval
+          # time. Without these three lines, every fresh deploy fails with
+          # "xnode.xnode-config has no value defined" / "Unknown kernel: linux".
+          xnode.xnode-config              = ./xnode-config;
+          xnode.container.enable          = lib.mkForce true;
+          nixpkgs.hostPlatform            = lib.mkForce "x86_64-linux";
 
           # ===== System user =====
           users.users.yggdrasil-monitor = {
