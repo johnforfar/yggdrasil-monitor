@@ -1,6 +1,9 @@
 ---
 export const prerender = false;
 
+import { startProbeLoop } from "../lib/probe.ts";
+startProbeLoop(Number(process.env.YGG_MONITOR_INTERVAL_S ?? "60"));
+
 interface Bucket {
   domain: string;
   layer: string;
@@ -14,12 +17,12 @@ interface Bucket {
 }
 
 let buckets: Bucket[] = [];
-let error: string | null = null;
 let since: string | null = null;
+let error: string | null = null;
 try {
-  const { GET } = await import("./api/summary.ts");
+  const mod = await import("./api/summary.ts");
   const req = new Request(Astro.url.origin + "/api/summary");
-  const res = await GET({ request: req, url: new URL(req.url) } as any);
+  const res = await mod.GET({ request: req, url: new URL(req.url) } as any);
   const data = await res.json();
   buckets = data.buckets ?? [];
   since = data.since ?? null;
@@ -53,13 +56,7 @@ const domains = [...byDomain.keys()].sort();
     <title>yggdrasil-monitor</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
-      body {
-        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-        background: #0e0e10;
-        color: #e6e6e6;
-        margin: 0;
-        padding: 2rem;
-      }
+      body { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: #0e0e10; color: #e6e6e6; margin: 0; padding: 2rem; }
       h1 { font-weight: 600; margin: 0 0 0.5rem 0; font-size: 1.25rem; }
       .meta { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
       table { width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.85rem; }
@@ -82,8 +79,11 @@ const domains = [...byDomain.keys()].sort();
     </div>
 
     {error && <div class="err">Summary endpoint error: {error}</div>}
+    {!error && buckets.length === 0 && (
+      <div class="meta">No probes recorded yet — give it a minute, the loop fires every 60s on the first request to this server.</div>
+    )}
 
-    {!error && (
+    {!error && buckets.length > 0 && (
       <table>
         <thead>
           <tr>
@@ -106,9 +106,7 @@ const domains = [...byDomain.keys()].sort();
                   <tr>
                     <td>&nbsp;</td>
                     <td>{b.layer}</td>
-                    <td>
-                      <span class="pill" style={`background:${p.bg}`}>{p.text}</span>
-                    </td>
+                    <td><span class="pill" style={`background:${p.bg}`}>{p.text}</span></td>
                     <td class="num">{b.ok} / {b.total}</td>
                     <td class="num">{b.avg_ms} ms</td>
                     <td class="num">{b.worst_streak_s > 0 ? fmtSec(b.worst_streak_s) : "—"}</td>
@@ -122,6 +120,6 @@ const domains = [...byDomain.keys()].sort();
       </table>
     )}
 
-    <div class="footer">Auto-refresh: reload. Storage: append-only JSON Lines, 30-day retention.</div>
+    <div class="footer">External-vantage probes from xnode-1 · 60 s cadence · 30 d retention · single Node process.</div>
   </body>
 </html>

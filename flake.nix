@@ -1,22 +1,15 @@
 {
-  description = "yggdrasil-monitor — external-vantage uptime monitor for the buildooors / openxai / openmesh fleet";
+  description = "yggdrasil-monitor — external-vantage uptime monitor (DNS + HTTPS probes)";
 
   inputs = {
-    xnodeos.url = "github:Openmesh-Network/xnodeos/v1";
-    nixpkgs.follows = "xnodeos/nixpkgs";
+    xnode-builders.url = "github:Openmesh-Network/xnode-builders";
+    nixpkgs.follows = "xnode-builders/nixpkgs";
   };
 
-  outputs = inputs: {
-    packages.x86_64-linux.default =
-      inputs.nixpkgs.legacyPackages.x86_64-linux.callPackage ./nix/package.nix { };
-
-    nixosModules.default =
-      { pkgs, ... }:
-      {
-        imports = [
-          inputs.xnodeos.nixosModules.app
-          ./nix/nixos-module.nix
-        ];
-      };
-  };
+  outputs =
+    inputs:
+    inputs.xnode-builders.language.auto {
+      src = ./.;
+      framework = "astro-node";
+    };
 }
