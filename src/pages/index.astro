@@ -1,0 +1,127 @@
+---
+export const prerender = false;
+
+interface Bucket {
+  domain: string;
+  layer: string;
+  total: number;
+  ok: number;
+  bad: number;
+  current: string;
+  last_bad_ts: string | null;
+  worst_streak_s: number;
+  avg_ms: number;
+}
+
+let buckets: Bucket[] = [];
+let error: string | null = null;
+let since: string | null = null;
+try {
+  const { GET } = await import("./api/summary.ts");
+  const req = new Request(Astro.url.origin + "/api/summary");
+  const res = await GET({ request: req, url: new URL(req.url) } as any);
+  const data = await res.json();
+  buckets = data.buckets ?? [];
+  since = data.since ?? null;
+} catch (e: any) {
+  error = e?.message ?? String(e);
+}
+
+const fmtSec = (s: number): string => {
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+  if (s < 86400) return `${(s / 3600).toFixed(1)}h`;
+  return `${(s / 86400).toFixed(1)}d`;
+};
+
+const dotFor = (c: string) =>
+  c === "ok" ? { bg: "#1fa971", text: "OK" } :
+  c === "bad" ? { bg: "#d6443d", text: "BAD" } :
+  { bg: "#7a7a7a", text: "—" };
+
+const byDomain = new Map<string, Bucket[]>();
+for (const b of buckets) {
+  if (!byDomain.has(b.domain)) byDomain.set(b.domain, []);
+  byDomain.get(b.domain)!.push(b);
+}
+const domains = [...byDomain.keys()].sort();
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>yggdrasil-monitor</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      body {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        background: #0e0e10;
+        color: #e6e6e6;
+        margin: 0;
+        padding: 2rem;
+      }
+      h1 { font-weight: 600; margin: 0 0 0.5rem 0; font-size: 1.25rem; }
+      .meta { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.85rem; }
+      th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #222; }
+      th { color: #888; font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+      .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; color: #fff; }
+      .domain { font-weight: 600; padding-top: 1rem; }
+      .num { font-variant-numeric: tabular-nums; }
+      .err { color: #d6443d; padding: 1rem; background: rgba(214,68,61,0.1); border-radius: 8px; }
+      .footer { color: #555; font-size: 0.75rem; margin-top: 2rem; }
+      a { color: #6bb4ff; }
+    </style>
+  </head>
+  <body>
+    <h1>yggdrasil-monitor</h1>
+    <div class="meta">
+      Last 24 h · since {since ?? "—"} · {buckets.length} buckets ·
+      <a href="/api/probes?since=24h">/api/probes</a> ·
+      <a href="/api/summary">/api/summary</a>
+    </div>
+
+    {error && <div class="err">Summary endpoint error: {error}</div>}
+
+    {!error && (
+      <table>
+        <thead>
+          <tr>
+            <th>Domain</th>
+            <th>Layer</th>
+            <th>Now</th>
+            <th class="num">OK / total</th>
+            <th class="num">Avg latency</th>
+            <th class="num">Worst bad streak</th>
+            <th>Last bad</th>
+          </tr>
+        </thead>
+        <tbody>
+          {domains.map((d) => (
+            <>
+              <tr><td class="domain" colspan="7">{d}</td></tr>
+              {byDomain.get(d)!.map((b) => {
+                const p = dotFor(b.current);
+                return (
+                  <tr>
+                    <td>&nbsp;</td>
+                    <td>{b.layer}</td>
+                    <td>
+                      <span class="pill" style={`background:${p.bg}`}>{p.text}</span>
+                    </td>
+                    <td class="num">{b.ok} / {b.total}</td>
+                    <td class="num">{b.avg_ms} ms</td>
+                    <td class="num">{b.worst_streak_s > 0 ? fmtSec(b.worst_streak_s) : "—"}</td>
+                    <td>{b.last_bad_ts ?? "—"}</td>
+                  </tr>
+                );
+              })}
+            </>
+          ))}
+        </tbody>
+      </table>
+    )}
+
+    <div class="footer">Auto-refresh: reload. Storage: append-only JSON Lines, 30-day retention.</div>
+  </body>
+</html>
