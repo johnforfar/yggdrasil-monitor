@@ -35,6 +35,15 @@ export const DOMAINS: DomainConfig[] = [
 // retains rows from earlier configurations).
 export const ACTIVE_DOMAINS: Set<string> = new Set(DOMAINS.map((d) => d.name));
 
+// Canonical (domain -> category) map. Read APIs use this instead of trusting
+// the per-probe category field, because probes written by older code versions
+// don't carry one.
+const CATEGORY_BY_DOMAIN: Map<string, Category> = new Map(
+  DOMAINS.map((d) => [d.name, d.category]),
+);
+export const categoryFor = (domain: string): Category =>
+  CATEGORY_BY_DOMAIN.get(domain) ?? "direct";
+
 const RESOLVERS: { name: string; servers: string[] }[] = [
   { name: "1.1.1.1", servers: ["1.1.1.1"] },
   { name: "8.8.8.8", servers: ["8.8.8.8"] },

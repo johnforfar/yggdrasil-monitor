@@ -1,6 +1,8 @@
 import type { APIRoute } from "astro";
 import { tail } from "../../lib/store.ts";
-import { ACTIVE_DOMAINS } from "../../lib/probe.ts";
+import { ACTIVE_DOMAINS, categoryFor } from "../../lib/probe.ts";
+// `categoryFor` exported for any future endpoint that needs it; not used here.
+void categoryFor;
 
 export const prerender = false;
 

@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { tail } from "../../lib/store.ts";
-import { ACTIVE_DOMAINS } from "../../lib/probe.ts";
+import { ACTIVE_DOMAINS, categoryFor } from "../../lib/probe.ts";
 
 export const prerender = false;
 
@@ -48,7 +48,7 @@ export const GET: APIRoute = async () => {
     let b = buckets.get(key);
     if (!b) {
       b = {
-        domain: p.domain, layer: p.layer, category: p.category ?? "direct",
+        domain: p.domain, layer: p.layer, category: categoryFor(p.domain),
         total: 0, ok: 0, bad: 0, current: "unknown",
         last_bad_ts: null, worst_streak_s: 0, avg_ms: 0,
         _msSum: 0, _streakStart: null,
