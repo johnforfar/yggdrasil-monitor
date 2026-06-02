@@ -36,6 +36,13 @@
       in
       {
         config = {
+          # Satisfy the `xnode.xnode-config` option that the xnodeos modules
+          # (transitively imported by the xnode-manager container module) demand.
+          # The xnode-manager wrapper sets `services.xnode-container.xnode-config`
+          # but NOT the older top-level `xnode.xnode-config`. Without this line
+          # every fresh deploy fails with "xnode.xnode-config has no value defined".
+          xnode.xnode-config = ./xnode-config;
+
           # ===== System user =====
           users.users.yggdrasil-monitor = {
             isSystemUser = true;
