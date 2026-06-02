@@ -2,19 +2,17 @@
   description = "yggdrasil-monitor — external-vantage uptime monitor (DNS + HTTPS probes)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.xnodeos.url = "github:Openmesh-Network/xnodeos";
   # om CLI overrides nixpkgs with openclaw/nixpkgs (dhcpcd-safe pin).
 
   outputs = inputs: {
-    nixosModules.default =
-      { pkgs, lib, ... }:
+    nixosModules.default = { pkgs, lib, ... }:
       let
-        # buildNpmPackage produces an Astro standalone Node server.
-        # Regenerate npmDepsHash with:
-        #   nix run nixpkgs#prefetch-npm-deps -- ./package-lock.json
         appPkg = pkgs.buildNpmPackage {
           pname = "yggdrasil-monitor";
           version = "0.1.0";
           src = ./.;
+          # Regenerate with: nix run nixpkgs#prefetch-npm-deps -- ./package-lock.json
           npmDepsHash = "sha256-GqolZZ2Z7ru2GioW7fzai7NdoKyyac+1BaIDTLLEMGg=";
           npmBuildScript = "build";
 
@@ -35,58 +33,53 @@
         };
       in
       {
-        config = {
-          # Canonical container-wrapper overrides per
-          # ENGINEERING/2026-05-27_CONTAINER-MIGRATION-SESSION.md §2:
-          # xnode-manager 1.0.1's auto-generated wrapper sets
-          # `services.xnode-container.xnode-config` but NOT the older
-          # `xnode.xnode-config` that `xnodeos.nixosModules.app` reads at eval
-          # time. Without these three lines, every fresh deploy fails with
-          # "xnode.xnode-config has no value defined" / "Unknown kernel: linux".
-          xnode.xnode-config              = ./xnode-config;
-          xnode.container.enable          = lib.mkForce true;
-          nixpkgs.hostPlatform            = lib.mkForce "x86_64-linux";
+        # Import xnodeos's app module so the `xnode` option namespace is
+        # declared in this module's eval scope, enabling us to set
+        # `xnode.xnode-config` etc. Per
+        # ENGINEERING/2026-05-27_CONTAINER-MIGRATION-SESSION.md §2.
+        imports = [ inputs.xnodeos.nixosModules.app ];
 
-          # ===== System user =====
+        config = {
+          xnode.xnode-config     = ./xnode-config;
+          xnode.container.enable = lib.mkForce true;
+          nixpkgs.hostPlatform   = lib.mkForce "x86_64-linux";
+
           users.users.yggdrasil-monitor = {
             isSystemUser = true;
             group        = "yggdrasil-monitor";
           };
           users.groups.yggdrasil-monitor = { };
 
-          # ===== Astro standalone server (probe loop runs inside this process) =====
           systemd.services.yggdrasil-monitor = {
             description = "yggdrasil-monitor — Astro server + in-process probe loop";
             after       = [ "network.target" ];
             wantedBy    = [ "multi-user.target" ];
 
             environment = {
-              HOST                      = "127.0.0.1";
-              PORT                      = "4321";
-              YGG_MONITOR_JSONL         = "/var/lib/yggdrasil-monitor/probes.jsonl";
-              YGG_MONITOR_INTERVAL_S    = "60";
-              NODE_ENV                  = "production";
+              HOST                   = "127.0.0.1";
+              PORT                   = "4321";
+              YGG_MONITOR_JSONL      = "/var/lib/yggdrasil-monitor/probes.jsonl";
+              YGG_MONITOR_INTERVAL_S = "60";
+              NODE_ENV               = "production";
             };
 
             serviceConfig = {
-              Type           = "simple";
-              ExecStart      = "${appPkg}/bin/yggdrasil-monitor-server";
-              Restart        = "always";
-              RestartSec     = "5s";
-              User           = "yggdrasil-monitor";
-              Group          = "yggdrasil-monitor";
-              StateDirectory = "yggdrasil-monitor";
-              # Hardening
-              ProtectSystem      = "strict";
-              ProtectHome        = true;
-              PrivateTmp         = true;
-              NoNewPrivileges    = true;
-              MemoryMax          = "256M";
-              TasksMax           = 64;
+              Type            = "simple";
+              ExecStart       = "${appPkg}/bin/yggdrasil-monitor-server";
+              Restart         = "always";
+              RestartSec      = "5s";
+              User            = "yggdrasil-monitor";
+              Group           = "yggdrasil-monitor";
+              StateDirectory  = "yggdrasil-monitor";
+              ProtectSystem   = "strict";
+              ProtectHome     = true;
+              PrivateTmp      = true;
+              NoNewPrivileges = true;
+              MemoryMax       = "256M";
+              TasksMax        = 64;
             };
           };
 
-          # ===== nginx — port 8080 (host owns 80) =====
           services.nginx = {
             enable                   = true;
             recommendedGzipSettings  = true;
