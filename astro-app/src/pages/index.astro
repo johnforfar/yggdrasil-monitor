@@ -7,6 +7,7 @@ startProbeLoop(Number(process.env.YGG_MONITOR_INTERVAL_S ?? "60"));
 interface Bucket {
   domain: string;
   layer: string;
+  category: string;
   total: number;
   ok: number;
   bad: number;
@@ -15,17 +16,25 @@ interface Bucket {
   worst_streak_s: number;
   avg_ms: number;
 }
+interface TsPoint { ts_ms: number; avg_ms: number; n: number; bad_n: number; }
 
 let buckets: Bucket[] = [];
+let series: Record<string, TsPoint[]> = {};
 let since: string | null = null;
+let bucketSec: number = 600;
 let error: string | null = null;
 try {
-  const mod = await import("./api/summary.ts");
-  const req = new Request(Astro.url.origin + "/api/summary");
-  const res = await mod.GET({ request: req, url: new URL(req.url) } as any);
-  const data = await res.json();
-  buckets = data.buckets ?? [];
-  since = data.since ?? null;
+  const sm = await import("./api/summary.ts");
+  const sRes = await sm.GET({ request: new Request(Astro.url.origin + "/api/summary"), url: new URL(Astro.url.origin + "/api/summary") } as any);
+  const sd = await sRes.json();
+  buckets = sd.buckets ?? [];
+  since = sd.since ?? null;
+
+  const tm = await import("./api/timeseries.ts");
+  const tRes = await tm.GET({ request: new Request(Astro.url.origin + "/api/timeseries?hours=24&buckets=144"), url: new URL(Astro.url.origin + "/api/timeseries?hours=24&buckets=144") } as any);
+  const td = await tRes.json();
+  series = td.series ?? {};
+  bucketSec = td.bucket_seconds ?? 600;
 } catch (e: any) {
   error = e?.message ?? String(e);
 }
@@ -42,84 +51,134 @@ const dotFor = (c: string) =>
   c === "bad" ? { bg: "#d6443d", text: "BAD" } :
   { bg: "#7a7a7a", text: "—" };
 
-const byDomain = new Map<string, Bucket[]>();
+const labelForLayer = (l: string): string =>
+  l === "dns" ? "DNS" : l === "https" ? "HTTPS" : l === "tcp" ? "TCP" : l;
+
+const renderSparkline = (pts: TsPoint[]): string => {
+  if (!pts || pts.length === 0) return "";
+  const W = 360, H = 36, PADY = 4;
+  const maxMs = Math.max(1, ...pts.map((p) => p.avg_ms));
+  const bw = W / pts.length;
+
+  const bands: string[] = [];
+  pts.forEach((p, i) => {
+    if (p.bad_n > 0 && p.n > 0) {
+      const opacity = Math.min(0.45, 0.12 + 0.5 * (p.bad_n / p.n));
+      bands.push(`<rect x="${(i * bw).toFixed(2)}" y="0" width="${bw.toFixed(2)}" height="${H}" fill="#d6443d" fill-opacity="${opacity.toFixed(2)}" />`);
+    }
+  });
+
+  const pathPts: string[] = [];
+  pts.forEach((p, i) => {
+    if (p.n === 0) return;
+    const x = (i + 0.5) * bw;
+    const y = PADY + (H - 2 * PADY) * (1 - p.avg_ms / maxMs);
+    pathPts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  });
+  const line = pathPts.length > 1
+    ? `<polyline points="${pathPts.join(" ")}" fill="none" stroke="#6bb4ff" stroke-width="1.5" />`
+    : "";
+
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block">${bands.join("")}${line}</svg>`;
+};
+
+const CAT_TITLES: Record<string, string> = {
+  relay: "Upstream Openmesh yggdrasil relay (root-cause indicator)",
+  yggdrasil: "Yggdrasil-routed sites (depend on the relay)",
+  direct: "Direct-routed sites (independent of the relay)",
+};
+const CAT_NOTES: Record<string, string> = {
+  relay: "peer.yggdrasil.openmesh.cloud over public IPv4 — TCP handshake on TLS port 9003. If this is BAD, every yggdrasil-routed site below will also be BAD.",
+  yggdrasil: "CNAME → 206-…yggdrasil.trustless.cloud. Reachability depends on the relay above + the trustless.cloud DNS proxy.",
+  direct: "Apex A/AAAA on the operator's public IP — no mesh hop, no trustless.cloud chain.",
+};
+const CAT_ORDER: string[] = ["relay", "yggdrasil", "direct"];
+
+const grouped = new Map<string, Map<string, Bucket[]>>();
 for (const b of buckets) {
-  if (!byDomain.has(b.domain)) byDomain.set(b.domain, []);
-  byDomain.get(b.domain)!.push(b);
+  let cat = grouped.get(b.category);
+  if (!cat) { cat = new Map(); grouped.set(b.category, cat); }
+  let arr = cat.get(b.domain);
+  if (!arr) { arr = []; cat.set(b.domain, arr); }
+  arr.push(b);
 }
-const domains = [...byDomain.keys()].sort();
 ---
 
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta http-equiv="refresh" content="30" />
     <title>yggdrasil-monitor</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
       body { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: #0e0e10; color: #e6e6e6; margin: 0; padding: 2rem; }
-      h1 { font-weight: 600; margin: 0 0 0.5rem 0; font-size: 1.25rem; }
-      .meta { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.85rem; }
-      th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #222; }
-      th { color: #888; font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+      h1 { font-weight: 600; margin: 0 0 0.25rem 0; font-size: 1.25rem; }
+      h2 { font-size: 0.92rem; font-weight: 600; color: #e6e6e6; margin: 2rem 0 0.25rem 0; letter-spacing: 0.02em; }
+      h2 small { color: #888; font-weight: 400; font-size: 0.78rem; display: block; margin-top: 0.15rem; }
+      .meta { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }
+      .domain-card { border-top: 1px solid #1a1a1d; padding: 0.65rem 0; }
+      .domain-name { font-weight: 600; font-size: 0.92rem; padding-bottom: 0.25rem; }
+      .layer-row { display: grid; grid-template-columns: 60px 60px 100px 100px 100px 1fr; align-items: center; gap: 0.5rem; padding: 0.2rem 0; font-size: 0.8rem; }
+      .layer { color: #888; }
       .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; color: #fff; }
-      .domain { font-weight: 600; padding-top: 1rem; }
       .num { font-variant-numeric: tabular-nums; }
+      .spark { background: #14141a; border-radius: 4px; }
       .err { color: #d6443d; padding: 1rem; background: rgba(214,68,61,0.1); border-radius: 8px; }
       .footer { color: #555; font-size: 0.75rem; margin-top: 2rem; }
       a { color: #6bb4ff; }
+      .legend { color: #666; font-size: 0.72rem; margin: 0.25rem 0 1rem 0; }
+      .legend span.swatch { display: inline-block; width: 10px; height: 10px; vertical-align: middle; margin: 0 4px 1px 8px; border-radius: 2px; }
     </style>
   </head>
   <body>
     <h1>yggdrasil-monitor</h1>
     <div class="meta">
-      Last 24 h · since {since ?? "—"} · {buckets.length} buckets ·
+      24 h window · auto-refresh every 30 s · since {since ?? "—"} ·
+      <a href="/api/summary">/api/summary</a> ·
       <a href="/api/probes?since=24h">/api/probes</a> ·
-      <a href="/api/summary">/api/summary</a>
+      <a href="/api/timeseries?hours=24">/api/timeseries</a>
+    </div>
+    <div class="legend">
+      Sparkline: line = average latency, <span class="swatch" style="background:#d6443d;opacity:0.45"></span>red band = outage window
+      · Bucket = {Math.round(bucketSec/60)} min · Vantage: xnode-1 over public internet
     </div>
 
-    {error && <div class="err">Summary endpoint error: {error}</div>}
-    {!error && buckets.length === 0 && (
-      <div class="meta">No probes recorded yet — give it a minute, the loop fires every 60s on the first request to this server.</div>
-    )}
+    {error && <div class="err">Summary fetch error: {error}</div>}
 
-    {!error && buckets.length > 0 && (
-      <table>
-        <thead>
-          <tr>
-            <th>Domain</th>
-            <th>Layer</th>
-            <th>Now</th>
-            <th class="num">OK / total</th>
-            <th class="num">Avg latency</th>
-            <th class="num">Worst bad streak</th>
-            <th>Last bad</th>
-          </tr>
-        </thead>
-        <tbody>
-          {domains.map((d) => (
-            <>
-              <tr><td class="domain" colspan="7">{d}</td></tr>
-              {byDomain.get(d)!.map((b) => {
-                const p = dotFor(b.current);
-                return (
-                  <tr>
-                    <td>&nbsp;</td>
-                    <td>{b.layer}</td>
-                    <td><span class="pill" style={`background:${p.bg}`}>{p.text}</span></td>
-                    <td class="num">{b.ok} / {b.total}</td>
-                    <td class="num">{b.avg_ms} ms</td>
-                    <td class="num">{b.worst_streak_s > 0 ? fmtSec(b.worst_streak_s) : "—"}</td>
-                    <td>{b.last_bad_ts ?? "—"}</td>
-                  </tr>
-                );
-              })}
-            </>
-          ))}
-        </tbody>
-      </table>
-    )}
+    {CAT_ORDER.map((cat) => {
+      const cm = grouped.get(cat);
+      if (!cm || cm.size === 0) return null;
+      const domains = [...cm.keys()].sort();
+      return (
+        <section>
+          <h2>{CAT_TITLES[cat] ?? cat}<small>{CAT_NOTES[cat] ?? ""}</small></h2>
+          {domains.map((d) => {
+            const rows = cm.get(d)!;
+            return (
+              <div class="domain-card">
+                <div class="domain-name">{d}</div>
+                {rows.map((r) => {
+                  const p = dotFor(r.current);
+                  const ts = series[`${r.domain}::${r.layer}`] ?? [];
+                  const svg = renderSparkline(ts);
+                  return (
+                    <div class="layer-row">
+                      <div class="layer">{labelForLayer(r.layer)}</div>
+                      <div><span class="pill" style={`background:${p.bg}`}>{p.text}</span></div>
+                      <div class="num">{r.ok}/{r.total}</div>
+                      <div class="num">{r.avg_ms} ms</div>
+                      <div class="num">{r.worst_streak_s > 0 ? fmtSec(r.worst_streak_s) : "—"}</div>
+                      <div class="spark" set:html={svg} />
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </section>
+      );
+    })}
 
-    <div class="footer">External-vantage probes from xnode-1 · 60 s cadence · 30 d retention · single Node process.</div>
+    <div class="footer">Built on xnode-1 · single Node process · probe loop fires every {Math.round(bucketSec/60)} min · 30 d on-disk retention.</div>
   </body>
 </html>

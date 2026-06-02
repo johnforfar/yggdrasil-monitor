@@ -12,6 +12,7 @@ const json = (body: unknown) =>
 interface Bucket {
   domain: string;
   layer: string;
+  category: string;
   total: number;
   ok: number;
   bad: number;
@@ -24,12 +25,14 @@ interface Bucket {
 const isBad = (p: any): boolean => {
   if (p.layer === "dns") return p.result !== "resolved";
   if (p.layer === "https") return !p.ok || p.http_code === 0 || (p.http_code >= 500);
+  if (p.layer === "tcp") return !p.ok;
   return false;
 };
 
 const probeMs = (p: any): number => {
   if (p.layer === "dns") return Number(p.took_ms ?? 0);
   if (p.layer === "https") return Math.round(Number(p.total_s ?? 0) * 1000);
+  if (p.layer === "tcp") return Math.round(Number(p.total_s ?? 0) * 1000);
   return 0;
 };
 
@@ -44,7 +47,7 @@ export const GET: APIRoute = async () => {
     let b = buckets.get(key);
     if (!b) {
       b = {
-        domain: p.domain, layer: p.layer,
+        domain: p.domain, layer: p.layer, category: p.category ?? "direct",
         total: 0, ok: 0, bad: 0, current: "unknown",
         last_bad_ts: null, worst_streak_s: 0, avg_ms: 0,
         _msSum: 0, _streakStart: null,
