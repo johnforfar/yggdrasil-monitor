@@ -52,20 +52,25 @@ const RESOLVERS: { name: string; servers: string[] }[] = [
 
 const nowIso = () => new Date().toISOString().slice(0, 19) + "Z";
 
+// Query A + AAAA + CNAME independently. resolveAny() is unreliable on
+// Cloudflare (1.1.1.1) and Google (8.8.8.8) because RFC 8482 lets them
+// return empty/HINFO for ANY queries — only Quad9 still returns full
+// records, which was causing a 2/3-resolver false-positive on every
+// yggdrasil-routed domain. Explicit per-type queries are immune.
 const resolveBoth = async (domain: string, servers: string[]): Promise<string[]> => {
   const r = new dnsPromises.Resolver({ timeout: 2000, tries: 1 });
   r.setServers(servers);
-  try {
-    const records = await r.resolveAny(domain);
-    return records.map((rec: any) => {
-      if (rec.address) return rec.address;
-      if (rec.value) return rec.value;
-      if (rec.exchange) return rec.exchange;
-      return JSON.stringify(rec);
-    });
-  } catch {
-    return [];
-  }
+  const out: string[] = [];
+  const safe = async <T,>(p: Promise<T[]>): Promise<T[]> => {
+    try { return await p; } catch { return []; }
+  };
+  const [v4, v6, cname] = await Promise.all([
+    safe(r.resolve4(domain)),
+    safe(r.resolve6(domain)),
+    safe(r.resolveCname(domain)),
+  ]);
+  out.push(...v4, ...v6, ...cname);
+  return out;
 };
 
 const probeDns = async (d: DomainConfig, name: string, servers: string[]): Promise<void> => {
