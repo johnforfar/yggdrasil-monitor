@@ -24,6 +24,7 @@ export const DOMAINS: DomainConfig[] = [
   { name: "network.buildooors.com",   category: "yggdrasil" },
   { name: "dashboard.buildooors.com", category: "yggdrasil" },
   { name: "desktop.buildooors.com",   category: "yggdrasil" },
+  { name: "llm.plopmenz.com",         category: "yggdrasil" },
   { name: "community.openxai.org",    category: "direct" },
   { name: "openxai.org",              category: "direct" },
   { name: "openmesh.network",         category: "direct" },
