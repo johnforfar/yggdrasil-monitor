@@ -92,32 +92,68 @@ const renderSparkline = (pts: TsPoint[]): string => {
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block">${bands.join("")}${line}</svg>`;
 };
 
-// Sparkline for load values. Reuses same W/H as latency for visual alignment.
-// Y axis: load relative to nCores. 1.0 (one core busy) -> bottom-mid; nCores -> top.
+// Sparkline for load values. Reuses same W/H + 24h time window as latency
+// sparklines so spikes on this row line up visually with HTTPS/DNS BAD bands
+// on the buildooors.com rows below — that's the whole point of this overlay.
+//
+// Time axis: now-24h on the left → now on the right. Samples are placed at
+// their actual ts within that window. Gaps (push agent down) appear as gaps
+// in the line — that's correct; we don't interpolate over missing data.
 const renderLoadSparkline = (samples: HostSample[], nCores: number = 8): string => {
-  if (!samples || samples.length === 0) return "";
   const W = 360, H = 36, PADY = 4;
-  // Cap visible load at 2x nCores for chart range (anything >2x is "extreme")
-  const maxLoad = Math.max(nCores * 2, ...samples.map((s) => s.load_1m));
-  const t0 = new Date(samples[0].ts).getTime();
-  const t1 = new Date(samples[samples.length - 1].ts).getTime();
-  const span = Math.max(1, t1 - t0);
-  const pathPts: string[] = [];
-  // Red-zone band where load > nCores (overcommit territory)
-  const overcommitY = PADY + (H - 2 * PADY) * (1 - nCores / maxLoad);
-  const band = `<rect x="0" y="0" width="${W}" height="${overcommitY.toFixed(1)}" fill="#d6443d" fill-opacity="0.05" />`;
-  for (const s of samples) {
+  // Fixed 24h window — same as the latency timeseries.
+  const nowMs = Date.now();
+  const windowMs = 24 * 60 * 60 * 1000;
+  const startMs = nowMs - windowMs;
+
+  // Filter to the 24h window
+  const inWindow = (samples ?? []).filter((s) => {
     const t = new Date(s.ts).getTime();
-    const x = ((t - t0) / span) * W;
-    const y = PADY + (H - 2 * PADY) * (1 - Math.min(s.load_1m, maxLoad) / maxLoad);
-    pathPts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
-  }
-  const line = pathPts.length > 1
-    ? `<polyline points="${pathPts.join(" ")}" fill="none" stroke="#ffb168" stroke-width="1.5" />`
-    : "";
+    return t >= startMs && t <= nowMs;
+  });
+
+  // Y axis: 0..max where max = max(2*nCores, observed peak). Anything beyond
+  // 2x nCores is "extreme overcommit" — capped at the top of the chart.
+  const observedMax = inWindow.length > 0 ? Math.max(...inWindow.map((s) => s.load_1m)) : 0;
+  const maxLoad = Math.max(nCores * 2, observedMax);
+  const yFor = (load: number): number => PADY + (H - 2 * PADY) * (1 - Math.min(load, maxLoad) / maxLoad);
+  const xFor = (tMs: number): number => ((tMs - startMs) / windowMs) * W;
+
+  // Red-zone band where load > nCores (overcommit territory — yggdrasil starves here)
+  const overcommitY = yFor(nCores);
+  const band = `<rect x="0" y="0" width="${W}" height="${overcommitY.toFixed(1)}" fill="#d6443d" fill-opacity="0.05" />`;
   // Reference line at load = nCores (where contention starts)
   const refLine = `<line x1="0" y1="${overcommitY.toFixed(1)}" x2="${W}" y2="${overcommitY.toFixed(1)}" stroke="#ffb168" stroke-opacity="0.25" stroke-dasharray="2,3" />`;
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block">${band}${refLine}${line}</svg>`;
+
+  if (inWindow.length === 0) {
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block">${band}${refLine}<text x="${W/2}" y="${H/2 + 4}" text-anchor="middle" fill="#666" font-size="10" font-family="ui-monospace, monospace">no samples in last 24h</text></svg>`;
+  }
+
+  // Render polyline. Gaps > 5 min split into separate polylines so we don't
+  // draw misleading straight lines across long outages.
+  const GAP_MS = 5 * 60 * 1000;
+  const segments: string[][] = [[]];
+  let prevMs: number | null = null;
+  for (const s of inWindow) {
+    const t = new Date(s.ts).getTime();
+    if (prevMs !== null && t - prevMs > GAP_MS) {
+      segments.push([]);
+    }
+    const x = xFor(t);
+    const y = yFor(s.load_1m);
+    segments[segments.length - 1].push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    prevMs = t;
+  }
+  const lines = segments
+    .filter((pts) => pts.length >= 1)
+    .map((pts) =>
+      pts.length === 1
+        ? `<circle cx="${pts[0].split(",")[0]}" cy="${pts[0].split(",")[1]}" r="1.5" fill="#ffb168" />`
+        : `<polyline points="${pts.join(" ")}" fill="none" stroke="#ffb168" stroke-width="1.5" />`
+    )
+    .join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block">${band}${refLine}${lines}</svg>`;
 };
 
 const latestHostSample: HostSample | null = hostSamples.length > 0 ? hostSamples[hostSamples.length - 1] : null;
