@@ -17,6 +17,7 @@ in {
       PORT = "8080";
       NODE_ENV = "production";
       YGG_MONITOR_JSONL = "/var/lib/yggdrasil-monitor/probes.jsonl";
+      YGG_MONITOR_METRICS_JSONL = "/var/lib/yggdrasil-monitor/host-metrics.jsonl";
       YGG_MONITOR_INTERVAL_S = "60";
     };
     serviceConfig = {
@@ -26,6 +27,9 @@ in {
       Restart = "on-failure";
       RestartSec = "5s";
       StateDirectory = "yggdrasil-monitor";
+      # Load operator-set secrets (om app env set) — leading `-` makes the
+      # file optional so first-deploy without secrets still boots.
+      EnvironmentFile = "-/xnode-config/env";
     };
   };
 
