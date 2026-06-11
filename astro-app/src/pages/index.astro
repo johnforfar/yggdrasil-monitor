@@ -91,8 +91,8 @@ const renderSparkline = (pts: TsPoint[]): string => {
     if (p.bad_n > 0 && p.n > 0) {
       const opacity = Math.min(0.45, 0.12 + 0.5 * (p.bad_n / p.n));
       // Hover tooltip on outage bands — per-bucket bad rate.
-      const tip = `${fmtTimeUtc(tsAtBucket(i))} · ${p.bad_n}/${p.n} bad (${((p.bad_n / p.n) * 100).toFixed(0)}%)`;
-      bands.push(`<rect x="${(i * bw).toFixed(2)}" y="0" width="${bw.toFixed(2)}" height="${H}" fill="#d6443d" fill-opacity="${opacity.toFixed(2)}"><title>${tip}</title></rect>`);
+      const tip = `${fmtTimeUtc(tsAtBucket(i))}\n${p.bad_n}/${p.n} bad (${((p.bad_n / p.n) * 100).toFixed(0)}%)`;
+      bands.push(`<rect x="${(i * bw).toFixed(2)}" y="0" width="${bw.toFixed(2)}" height="${H}" fill="#d6443d" fill-opacity="${opacity.toFixed(2)}" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`);
     }
   });
 
@@ -106,8 +106,8 @@ const renderSparkline = (pts: TsPoint[]): string => {
     const y = PADY + (H - 2 * PADY) * (1 - p.avg_ms / maxMs);
     pathPts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
     // Larger transparent hit-target circle on top of each datapoint for hover.
-    const tip = `${fmtTimeUtc(tsAtBucket(i))} · ${p.avg_ms} ms avg · ${p.n} probes${p.bad_n > 0 ? ` · ${p.bad_n} bad` : ""}`;
-    dots.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="transparent" stroke="transparent"><title>${tip}</title></circle>`);
+    const tip = `${fmtTimeUtc(tsAtBucket(i))}\n${p.avg_ms} ms avg · ${p.n} probes${p.bad_n > 0 ? ` · ${p.bad_n} bad` : ""}`;
+    dots.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="rgba(107,180,255,0.001)" data-tip="${tip.replace(/"/g, "&quot;")}"></circle>`);
   });
   const line = pathPts.length > 1
     ? `<polyline points="${pathPts.join(" ")}" fill="none" stroke="#6bb4ff" stroke-width="1.5" pointer-events="none" />`
@@ -240,6 +240,11 @@ for (const b of buckets) {
       .footer { color: #555; font-size: 0.75rem; margin-top: 2rem; }
       a { color: #6bb4ff; }
       .legend { color: #666; font-size: 0.72rem; margin: 0.25rem 0 1rem 0; }
+      #ygg-tip { position: fixed; pointer-events: none; background: #1a1a1f; color: #e6e6e6;
+        border: 1px solid #2a2a2e; border-radius: 4px; padding: 0.4rem 0.55rem;
+        font: 0.72rem ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space: pre;
+        z-index: 99; opacity: 0; transition: opacity 80ms; max-width: 320px; line-height: 1.35; }
+      #ygg-tip.show { opacity: 1; }
       .legend span.swatch { display: inline-block; width: 10px; height: 10px; vertical-align: middle; margin: 0 4px 1px 8px; border-radius: 2px; }
       .section-relay h2 { color: #ffb168; }
       .section-yggdrasil h2 { color: #e6e6e6; }
@@ -328,5 +333,42 @@ for (const b of buckets) {
     })}
 
     <div class="footer">Built on xnode-1 · single Node process · probe loop fires every {Math.round(bucketSec/60)} min · 30 d on-disk retention.</div>
+    <div id="ygg-tip" role="tooltip"></div>
+    <script is:inline>
+      // Tooltip: any SVG element with data-tip shows a positioned panel on hover/tap.
+      // Pointer events instead of mouse only — works for touch + stylus too.
+      (function () {
+        const tip = document.getElementById('ygg-tip');
+        if (!tip) return;
+        const show = (e, txt) => {
+          tip.textContent = txt;
+          const pad = 10;
+          let x = e.clientX + pad, y = e.clientY + pad;
+          // Flip to left/up if near right/bottom edge
+          const rect = tip.getBoundingClientRect();
+          if (x + 320 > window.innerWidth) x = e.clientX - 320 - pad;
+          if (y + rect.height > window.innerHeight) y = e.clientY - rect.height - pad;
+          tip.style.left = x + 'px';
+          tip.style.top = y + 'px';
+          tip.classList.add('show');
+        };
+        const hide = () => tip.classList.remove('show');
+        document.addEventListener('pointermove', (e) => {
+          const t = e.target;
+          if (t && t.getAttribute && t.getAttribute('data-tip')) {
+            show(e, t.getAttribute('data-tip'));
+          } else {
+            hide();
+          }
+        });
+        document.addEventListener('pointerleave', hide);
+        document.addEventListener('pointercancel', hide);
+        // Tap-anywhere-else dismisses (mobile).
+        document.addEventListener('pointerdown', (e) => {
+          const t = e.target;
+          if (!t || !t.getAttribute || !t.getAttribute('data-tip')) hide();
+        });
+      })();
+    </script>
   </body>
 </html>
