@@ -20,6 +20,10 @@ const RELAY_TLS_PORT = 9003;
 
 export const DOMAINS: DomainConfig[] = [
   { name: RELAY_HOST,                 category: "relay",     tcp_port: RELAY_TLS_PORT },
+  // Per-server relay probes: the hostname above round-robins to BOTH peer IPs,
+  // so a single-peer outage can hide behind the healthy one. Probe each directly.
+  { name: "23.227.167.191",           category: "relay",     tcp_port: RELAY_TLS_PORT }, // peer-us (hvvc.us)
+  { name: "46.232.249.203",           category: "relay",     tcp_port: RELAY_TLS_PORT }, // peer-eu (ultrasrv.de)
   { name: "ai.buildooors.com",        category: "yggdrasil" },
   { name: "network.buildooors.com",   category: "yggdrasil" },
   { name: "dashboard.buildooors.com", category: "yggdrasil" },
@@ -146,10 +150,16 @@ const probeTcp = async (d: DomainConfig): Promise<void> => {
   });
 };
 
+// A raw IPv4/IPv6 literal — DNS resolution doesn't apply, so skip the DNS layer
+// (otherwise every per-IP relay probe records a spurious "empty" DNS failure).
+const isRawIp = (s: string): boolean => /^\d{1,3}(\.\d{1,3}){3}$/.test(s) || s.includes(":");
+
 export const runOnce = async (): Promise<void> => {
   for (const d of DOMAINS) {
-    for (const r of RESOLVERS) {
-      await probeDns(d, r.name, r.servers);
+    if (!isRawIp(d.name)) {
+      for (const r of RESOLVERS) {
+        await probeDns(d, r.name, r.servers);
+      }
     }
     if (d.tcp_port) {
       await probeTcp(d);
