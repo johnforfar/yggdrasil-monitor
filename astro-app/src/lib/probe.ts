@@ -29,8 +29,13 @@ export const DOMAINS: DomainConfig[] = [
   { name: "dashboard.buildooors.com", category: "yggdrasil" },
   { name: "desktop.buildooors.com",   category: "yggdrasil" },
   { name: "llm.plopmenz.com",         category: "yggdrasil" },
-  { name: "community.openxai.org",    category: "direct" },
-  { name: "openxai.org",              category: "direct" },
+  // Own1 demo (moved off buildooors.com → Ashton's ownx.co) + Sam's box, all
+  // ygg-routed via the relays above — so the monitor pins the full demo path.
+  { name: "john.demo.ownx.co",        category: "yggdrasil" },
+  { name: "sam.demo.ownx.co",         category: "yggdrasil" }, // Sam's demo container
+  { name: "ownx.co",                  category: "direct" },
+  { name: "community.openxnetwork.org", category: "direct" }, // was openxai.org (rebrand)
+  { name: "openxnetwork.org",         category: "direct" },   // was openxai.org (rebrand)
   { name: "openmesh.network",         category: "direct" },
   { name: "v10.build.openmesh.cloud", category: "direct" },
 ];
