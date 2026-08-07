@@ -40,7 +40,7 @@ try {
 
   // Own1 host-metrics push samples (24 h window). Used for the correlation
   // panel — operator wants to see "load 64 spike at HH:MM" lined up against
-  // "HTTPS bad at HH:MM" for ai.buildooors.com.
+  // "HTTPS bad at HH:MM" for john.demo.ownx.co.
   const hm = await import("./api/host-metrics.ts");
   const hRes = await hm.GET({ request: new Request(Astro.url.origin + "/api/host-metrics?node=own1&since=24h"), url: new URL(Astro.url.origin + "/api/host-metrics?node=own1&since=24h") } as any);
   const hd = await hRes.json();
@@ -118,7 +118,7 @@ const renderSparkline = (pts: TsPoint[]): string => {
 
 // Sparkline for load values. Reuses same W/H + 24h time window as latency
 // sparklines so spikes on this row line up visually with HTTPS/DNS BAD bands
-// on the buildooors.com rows below — that's the whole point of this overlay.
+// on the demo-box rows below — that is the whole point of this overlay.
 //
 // Time axis: now-24h on the left → now on the right. Samples are placed at
 // their actual ts within that window. Gaps (push agent down) appear as gaps

@@ -12,7 +12,7 @@ export interface DomainConfig {
 }
 
 // The upstream openmesh yggdrasil relay. ALL yggdrasil-routed sites depend
-// on it being reachable; if it's down, every buildooors.com domain dies.
+// on it being reachable; if it's down, every *.demo.ownx.co box dies at once.
 // Probing both DNS resolution AND TCP reachability on the yggdrasil-peer
 // TLS port pins root cause when sites fail.
 const RELAY_HOST = "peer.yggdrasil.openmesh.cloud";
@@ -24,10 +24,11 @@ export const DOMAINS: DomainConfig[] = [
   // so a single-peer outage can hide behind the healthy one. Probe each directly.
   { name: "23.227.167.191",           category: "relay",     tcp_port: RELAY_TLS_PORT }, // peer-us (hvvc.us)
   { name: "46.232.249.203",           category: "relay",     tcp_port: RELAY_TLS_PORT }, // peer-eu (ultrasrv.de)
-  { name: "ai.buildooors.com",        category: "yggdrasil" },
-  { name: "network.buildooors.com",   category: "yggdrasil" },
-  { name: "dashboard.buildooors.com", category: "yggdrasil" },
-  { name: "desktop.buildooors.com",   category: "yggdrasil" },
+  // Removed 2026-08-07: ai / network / dashboard / desktop.buildooors.com.
+  // Those containers were retired during the 2026-08-01 consolidation, so all four
+  // sat at 100% bad indefinitely. Permanent red is worse than no row — it trains
+  // you to ignore the board, and it buried the one signal that mattered (john and
+  // sam diverging). ACTIVE_DOMAINS filters their historical rows out of the APIs.
   { name: "llm.plopmenz.com",         category: "yggdrasil" },
   // Own1 demo (moved off buildooors.com → Ashton's ownx.co) + Sam's box, all
   // ygg-routed via the relays above — so the monitor pins the full demo path.
