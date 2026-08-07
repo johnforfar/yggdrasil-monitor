@@ -31,8 +31,18 @@ export const DOMAINS: DomainConfig[] = [
   { name: "llm.plopmenz.com",         category: "yggdrasil" },
   // Own1 demo (moved off buildooors.com → Ashton's ownx.co) + Sam's box, all
   // ygg-routed via the relays above — so the monitor pins the full demo path.
-  { name: "john.demo.ownx.co",        category: "yggdrasil" },
-  { name: "sam.demo.ownx.co",         category: "yggdrasil" }, // Sam's demo container
+  // The three demo boxes sit in different regions and resolve to DIFFERENT relays
+  // (john → 23.227.167.191 US, sam → 46.232.249.203 EU), which is why the
+  // per-relay probes above matter: a one-relay outage takes down one box, not all.
+  { name: "john.demo.ownx.co",        category: "yggdrasil" }, // Own1, ASIA
+  { name: "sam.demo.ownx.co",         category: "yggdrasil" }, // Sam's demo container, EU
+  // Ashton's box (ME) is listed on demo.ownx.co but has NO DNS record yet, so this
+  // WILL read down until one is created. That is deliberate — a red row is a
+  // standing reminder the record is missing, which a silent omission would not be.
+  { name: "ashton.demo.ownx.co",      category: "yggdrasil" }, // ME — pending DNS
+  // The demo index itself. Vercel-hosted, so it is a `direct` control: if this is
+  // green while the three boxes are red, the fault is the ygg path, not the site.
+  { name: "demo.ownx.co",             category: "direct" },
   { name: "ownx.co",                  category: "direct" },
   { name: "community.openxnetwork.org", category: "direct" }, // was openxai.org (rebrand)
   { name: "openxnetwork.org",         category: "direct" },   // was openxai.org (rebrand)
