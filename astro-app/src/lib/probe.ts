@@ -50,6 +50,15 @@ export const DOMAINS: DomainConfig[] = [
   { name: "ashton.demo.ownx.co", category: "yggdrasil", label: "ME · Ashton — DNS record not created yet" },
   // The demo index itself. Vercel-hosted, so it is a `direct` control: if this is
   // green while the three boxes are red, the fault is the ygg path, not the site.
+  // memegen — Own1's dedicated image-generation container, live 2026-08-07.
+  // Same ygg-CNAME path as the demo boxes, so it inherits the same bridge risk;
+  // watched from day one rather than after the first outage nobody noticed.
+  { name: "memegen.buildooors.com", category: "yggdrasil", label: "ASIA · Own1 — MEMEGEN (imagegen)" },
+  // The public/community name for the same app. A SECOND row on purpose: if the
+  // buildooors name is green and this one is red, the fault is that DNS record,
+  // not Own1 — which is exactly the distinction that took an hour to establish
+  // by hand on 2026-08-07.
+  { name: "memegen.marketplace.openxnetwork.org", category: "yggdrasil", label: "MEMEGEN — public/community name" },
   { name: "demo.ownx.co",             category: "direct" },
   { name: "ownx.co",                  category: "direct" },
   { name: "community.openxnetwork.org", category: "direct" }, // was openxai.org (rebrand)
