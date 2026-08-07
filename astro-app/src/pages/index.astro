@@ -1,7 +1,7 @@
 ---
 export const prerender = false;
 
-import { startProbeLoop } from "../lib/probe.ts";
+import { startProbeLoop, labelFor } from "../lib/probe.ts";
 startProbeLoop(Number(process.env.YGG_MONITOR_INTERVAL_S ?? "60"));
 
 interface Bucket {
@@ -231,6 +231,8 @@ for (const b of buckets) {
       .meta { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }
       .domain-card { border-top: 1px solid #1a1a1d; padding: 0.65rem 0; }
       .domain-name { font-weight: 600; font-size: 0.92rem; padding-bottom: 0.25rem; }
+      /* Region/operator, so a bare relay IP says WHERE it is without a lookup. */
+      .domain-label { color: #888; font-weight: 400; font-size: 0.78rem; margin-left: 0.5rem; }
       .layer-row { display: grid; grid-template-columns: 60px 60px 100px 100px 100px 1fr; align-items: center; gap: 0.5rem; padding: 0.2rem 0; font-size: 0.8rem; }
       .layer { color: #888; }
       .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; color: #fff; }
@@ -309,7 +311,9 @@ for (const b of buckets) {
             const rows = cm.get(d)!;
             return (
               <div class="domain-card">
-                <div class="domain-name">{d}</div>
+                <div class="domain-name">{d}
+                  {labelFor(d) && <span class="domain-label">{labelFor(d)}</span>}
+                </div>
                 {rows.map((r) => {
                   const p = dotFor(r.current);
                   const ts = series[`${r.domain}::${r.layer}`] ?? [];

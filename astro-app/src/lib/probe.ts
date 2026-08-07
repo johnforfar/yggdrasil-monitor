@@ -9,6 +9,10 @@ export interface DomainConfig {
   // For relay/raw-host targets, optionally do a TCP-port probe instead
   // of HTTPS (e.g. the yggdrasil peer TLS port).
   tcp_port?: number;
+  // Shown next to the name on the page. Bare IPs and bare hostnames say nothing
+  // about WHERE a thing is, and "which relay just died" is the first question
+  // asked during an outage.
+  label?: string;
 }
 
 // The upstream openmesh yggdrasil relay. ALL yggdrasil-routed sites depend
@@ -22,8 +26,11 @@ export const DOMAINS: DomainConfig[] = [
   { name: RELAY_HOST,                 category: "relay",     tcp_port: RELAY_TLS_PORT },
   // Per-server relay probes: the hostname above round-robins to BOTH peer IPs,
   // so a single-peer outage can hide behind the healthy one. Probe each directly.
-  { name: "23.227.167.191",           category: "relay",     tcp_port: RELAY_TLS_PORT }, // peer-us (hvvc.us)
-  { name: "46.232.249.203",           category: "relay",     tcp_port: RELAY_TLS_PORT }, // peer-eu (ultrasrv.de)
+  // Geolocation verified 2026-08-07 by rDNS + ipinfo, not guessed:
+  //   23.227.167.191 → 23-227-167-191.static.hvvc.us  · Hivelocity · Los Angeles, US
+  //   46.232.249.203 → …ultrasrv.de                   · netcup GmbH · Nuremberg, DE
+  { name: "23.227.167.191",  category: "relay", tcp_port: RELAY_TLS_PORT, label: "US · Los Angeles (Hivelocity)" },
+  { name: "46.232.249.203",  category: "relay", tcp_port: RELAY_TLS_PORT, label: "EU · Nuremberg (netcup)" },
   // Removed 2026-08-07: ai / network / dashboard / desktop.buildooors.com.
   // Those containers were retired during the 2026-08-01 consolidation, so all four
   // sat at 100% bad indefinitely. Permanent red is worse than no row — it trains
@@ -35,12 +42,12 @@ export const DOMAINS: DomainConfig[] = [
   // The three demo boxes sit in different regions and resolve to DIFFERENT relays
   // (john → 23.227.167.191 US, sam → 46.232.249.203 EU), which is why the
   // per-relay probes above matter: a one-relay outage takes down one box, not all.
-  { name: "john.demo.ownx.co",        category: "yggdrasil" }, // Own1, ASIA
-  { name: "sam.demo.ownx.co",         category: "yggdrasil" }, // Sam's demo container, EU
+  { name: "john.demo.ownx.co",   category: "yggdrasil", label: "ASIA · Own1 (Johnny)" },
+  { name: "sam.demo.ownx.co",    category: "yggdrasil", label: "EU · Sam" },
   // Ashton's box (ME) is listed on demo.ownx.co but has NO DNS record yet, so this
   // WILL read down until one is created. That is deliberate — a red row is a
   // standing reminder the record is missing, which a silent omission would not be.
-  { name: "ashton.demo.ownx.co",      category: "yggdrasil" }, // ME — pending DNS
+  { name: "ashton.demo.ownx.co", category: "yggdrasil", label: "ME · Ashton — DNS record not created yet" },
   // The demo index itself. Vercel-hosted, so it is a `direct` control: if this is
   // green while the three boxes are red, the fault is the ygg path, not the site.
   { name: "demo.ownx.co",             category: "direct" },
@@ -62,6 +69,14 @@ export const ACTIVE_DOMAINS: Set<string> = new Set(DOMAINS.map((d) => d.name));
 const CATEGORY_BY_DOMAIN: Map<string, Category> = new Map(
   DOMAINS.map((d) => [d.name, d.category]),
 );
+// Human label for a probe target (region + operator). Bare IPs on the page do not
+// answer "which relay is down", which is the first question during an outage.
+const LABEL_BY_DOMAIN: Map<string, string> = new Map(
+  DOMAINS.filter((d) => d.label).map((d) => [d.name, d.label as string]),
+);
+export const labelFor = (domain: string): string | undefined =>
+  LABEL_BY_DOMAIN.get(domain);
+
 export const categoryFor = (domain: string): Category =>
   CATEGORY_BY_DOMAIN.get(domain) ?? "direct";
 
