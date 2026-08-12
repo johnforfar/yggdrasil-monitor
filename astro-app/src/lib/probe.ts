@@ -58,6 +58,20 @@ export const DOMAINS: DomainConfig[] = [
   // not Own1 — which is exactly the distinction that took an hour to establish
   // by hand on 2026-08-07.
   { name: "memegen.marketplace.openxnetwork.org", category: "yggdrasil", label: "MEMEGEN — public/community name" },
+  // The rest of Own1's public apps. Watched for their own sake, but the probe
+  // doubles as a KEEPALIVE and that is measurably the bigger win: on 2026-08-12
+  // the two monitored Own1 domains answered in a flat ~1.2-1.7 s while these
+  // three took 3.7-4.1 s on a cold first request before settling to the same
+  // speed. Idle lets the trustless.cloud DNS entry and the ygg route go cold,
+  // and the first visitor pays for re-establishing both — or, per the 24 h
+  // measurements, simply fails.
+  //
+  // A 60 s probe from xnode-1 beats Sam's in-browser 50 s keepalive for this,
+  // because it runs whether or not anyone has a page open — which is precisely
+  // when a site has gone cold.
+  { name: "power.buildooors.com",    category: "yggdrasil", label: "ASIA · Own1 — own-power" },
+  { name: "vesper.buildooors.com",   category: "yggdrasil", label: "ASIA · Own1 — vesper" },
+  { name: "comicgen.buildooors.com", category: "yggdrasil", label: "ASIA · Own1 — comicgen" },
   { name: "demo.ownx.co",             category: "direct" },
   { name: "ownx.co",                  category: "direct" },
   { name: "community.openxnetwork.org", category: "direct" }, // was openxai.org (rebrand)
