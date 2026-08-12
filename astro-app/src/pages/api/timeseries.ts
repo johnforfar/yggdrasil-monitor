@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { tail } from "../../lib/store.ts";
+import { readRange, tail } from "../../lib/store.ts";
 import { ACTIVE_DOMAINS, categoryFor } from "../../lib/probe.ts";
 // `categoryFor` exported for any future endpoint that needs it; not used here.
 void categoryFor;
@@ -31,15 +31,23 @@ const probeMs = (p: any): number => {
 // Used by index.astro to render sparkline graphs with red outage backgrounds.
 export const GET: APIRoute = async ({ url }) => {
   const hoursRaw = url.searchParams.get("hours");
-  const hours = Math.max(1, Math.min(168, Number(hoursRaw) || 24));
+  // Up to 720 h (30 d) — matches the on-disk retention, so the whole history is navigable.
+  const hours = Math.max(1, Math.min(720, Number(hoursRaw) || 24));
   const bucketsCount = Math.max(20, Math.min(288, Number(url.searchParams.get("buckets")) || 144));
 
-  const now = Date.now();
+  // `end` (epoch ms) anchors the window — omit for a live "now" window, pass a past
+  // timestamp to go back in time. Clamped to now so a future end can't be requested.
+  const endRaw = url.searchParams.get("end");
+  const now = endRaw ? Math.min(Date.now(), Number(endRaw) || Date.now()) : Date.now();
   const since = now - hours * 3600 * 1000;
   const sinceIso = new Date(since).toISOString().slice(0, 19) + "Z";
   const bucketMs = (hours * 3600 * 1000) / bucketsCount;
 
-  const probes = await tail(16 * 1024 * 1024, (p: any) => p.ts >= sinceIso && ACTIVE_DOMAINS.has(p.domain));
+  // Live window → fast byte-tail; explicit past `end` → full range scan (the old
+  // rows are earlier in the file than the tail can reach).
+  const probes = endRaw
+    ? await readRange(since, now, (p: any) => ACTIVE_DOMAINS.has(p.domain))
+    : await tail(16 * 1024 * 1024, (p: any) => p.ts >= sinceIso && ACTIVE_DOMAINS.has(p.domain));
 
   // Map<key, Array<{sum_ms,n,bad_n}>>
   type Bin = { sum_ms: number; n: number; bad_n: number };

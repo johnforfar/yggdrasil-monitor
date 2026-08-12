@@ -1,4 +1,4 @@
-import { appendFile, open, stat } from "node:fs/promises";
+import { appendFile, open, readFile, stat } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -58,4 +58,31 @@ export const tail = async (
   } finally {
     await fh.close();
   }
+};
+
+// Read ALL rows whose `ts` falls in [sinceMs, endMs], optionally filtered. Used
+// for "go back in time" history windows the byte-tail can't reach (an old window
+// lives earlier in the file than the last maxBytes). A full scan — heavier than
+// tail(), so callers use it only for explicit past windows, never the live view.
+// At 60s probes × ~20 series ≈ 3.5 MB/day, a 30 d file is ~100 MB: a ~1 s scan.
+export const readRange = async (
+  sinceMs: number,
+  endMs: number,
+  predicate?: (obj: any) => boolean,
+): Promise<any[]> => {
+  ensure();
+  if (!existsSync(path)) return [];
+  const text = await readFile(path, "utf-8");
+  const out: any[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      const ts = Date.parse(obj.ts);
+      if (Number.isFinite(ts) && ts >= sinceMs && ts <= endMs && (!predicate || predicate(obj))) {
+        out.push(obj);
+      }
+    } catch { /* skip malformed */ }
+  }
+  return out;
 };

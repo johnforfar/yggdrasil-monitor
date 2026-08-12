@@ -36,7 +36,6 @@ export const DOMAINS: DomainConfig[] = [
   // sat at 100% bad indefinitely. Permanent red is worse than no row — it trains
   // you to ignore the board, and it buried the one signal that mattered (john and
   // sam diverging). ACTIVE_DOMAINS filters their historical rows out of the APIs.
-  { name: "llm.plopmenz.com",         category: "yggdrasil" },
   // Own1 demo (moved off buildooors.com → Ashton's ownx.co) + Sam's box, all
   // ygg-routed via the relays above — so the monitor pins the full demo path.
   // The three demo boxes sit in different regions and resolve to DIFFERENT relays

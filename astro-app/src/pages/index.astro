@@ -4,6 +4,23 @@ export const prerender = false;
 import { startProbeLoop, labelFor } from "../lib/probe.ts";
 startProbeLoop(Number(process.env.YGG_MONITOR_INTERVAL_S ?? "60"));
 
+// ── Time window (URL-driven — shareable links, browser back/forward work) ──
+// hours = span (1..720 = the 30 d on-disk retention); end = epoch ms anchoring
+// the right edge (omit = live "now"). Everything below reads these.
+const WIN_HOURS = Math.max(1, Math.min(720, Number(Astro.url.searchParams.get("hours")) || 24));
+const END_PARAM = Astro.url.searchParams.get("end");
+const WIN_END = END_PARAM ? Math.min(Date.now(), Number(END_PARAM) || Date.now()) : Date.now();
+const WIN_MS = WIN_HOURS * 3600 * 1000;
+const WIN_START = WIN_END - WIN_MS;
+const IS_LIVE = !END_PARAM;
+const qWin = `hours=${WIN_HOURS}${IS_LIVE ? "" : `&end=${WIN_END}`}`;
+// Number of buckets: keep ~144 for short spans, cap so a 30 d view stays ~10-min resolution.
+const WIN_BUCKETS = Math.max(48, Math.min(288, Math.round(WIN_HOURS * 6)));
+// Human label for the current span.
+const spanLabel = WIN_HOURS < 1
+  ? `${Math.round(WIN_HOURS * 60)} min`
+  : WIN_HOURS < 48 ? `${WIN_HOURS} h` : `${(WIN_HOURS / 24).toFixed(WIN_HOURS % 24 ? 1 : 0)} d`;
+
 interface Bucket {
   domain: string;
   layer: string;
@@ -27,13 +44,15 @@ interface HostSample { ts: string; node: string; load_1m: number; load_5m: numbe
 let hostSamples: HostSample[] = [];
 try {
   const sm = await import("./api/summary.ts");
-  const sRes = await sm.GET({ request: new Request(Astro.url.origin + "/api/summary"), url: new URL(Astro.url.origin + "/api/summary") } as any);
+  const sUrl = `${Astro.url.origin}/api/summary?${qWin}`;
+  const sRes = await sm.GET({ request: new Request(sUrl), url: new URL(sUrl) } as any);
   const sd = await sRes.json();
   buckets = sd.buckets ?? [];
   since = sd.since ?? null;
 
   const tm = await import("./api/timeseries.ts");
-  const tRes = await tm.GET({ request: new Request(Astro.url.origin + "/api/timeseries?hours=24&buckets=144"), url: new URL(Astro.url.origin + "/api/timeseries?hours=24&buckets=144") } as any);
+  const tUrl = `${Astro.url.origin}/api/timeseries?${qWin}&buckets=${WIN_BUCKETS}`;
+  const tRes = await tm.GET({ request: new Request(tUrl), url: new URL(tUrl) } as any);
   const td = await tRes.json();
   series = td.series ?? {};
   bucketSec = td.bucket_seconds ?? 600;
@@ -42,7 +61,8 @@ try {
   // panel — operator wants to see "load 64 spike at HH:MM" lined up against
   // "HTTPS bad at HH:MM" for john.demo.ownx.co.
   const hm = await import("./api/host-metrics.ts");
-  const hRes = await hm.GET({ request: new Request(Astro.url.origin + "/api/host-metrics?node=own1&since=24h"), url: new URL(Astro.url.origin + "/api/host-metrics?node=own1&since=24h") } as any);
+  const hUrl = `${Astro.url.origin}/api/host-metrics?node=own1&since=${WIN_HOURS}h${IS_LIVE ? "" : `&end=${WIN_END}`}`;
+  const hRes = await hm.GET({ request: new Request(hUrl), url: new URL(hUrl) } as any);
   const hd = await hRes.json();
   hostSamples = hd.samples ?? [];
 } catch (e: any) {
@@ -80,10 +100,10 @@ const renderSparkline = (pts: TsPoint[]): string => {
   const maxMs = Math.max(1, ...pts.map((p) => p.avg_ms));
   const bw = W / pts.length;
 
-  // Anchor the rendered window to NOW so it lines up with the host-metrics row.
-  const nowMs = Date.now();
-  const windowMs = 24 * 60 * 60 * 1000;
-  const startMs = nowMs - windowMs;
+  // Anchor to the SELECTED window so it lines up with the host-metrics row.
+  const nowMs = WIN_END;
+  const windowMs = WIN_MS;
+  const startMs = WIN_START;
   const tsAtBucket = (i: number) => startMs + ((i + 0.5) / pts.length) * windowMs;
 
   const bands: string[] = [];
@@ -125,12 +145,12 @@ const renderSparkline = (pts: TsPoint[]): string => {
 // in the line — that's correct; we don't interpolate over missing data.
 const renderLoadSparkline = (samples: HostSample[], nCores: number = 8): string => {
   const W = 360, H = 36, PADY = 4;
-  // Fixed 24h window — same as the latency timeseries.
-  const nowMs = Date.now();
-  const windowMs = 24 * 60 * 60 * 1000;
-  const startMs = nowMs - windowMs;
+  // Selected window — same as the latency timeseries.
+  const nowMs = WIN_END;
+  const windowMs = WIN_MS;
+  const startMs = WIN_START;
 
-  // Filter to the 24h window
+  // Filter to the window
   const inWindow = (samples ?? []).filter((s) => {
     const t = new Date(s.ts).getTime();
     return t >= startMs && t <= nowMs;
@@ -220,7 +240,7 @@ for (const b of buckets) {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="refresh" content="30" />
+    {IS_LIVE && <meta http-equiv="refresh" content="30" />}
     <title>yggdrasil-monitor</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
@@ -229,6 +249,16 @@ for (const b of buckets) {
       h2 { font-size: 0.92rem; font-weight: 600; color: #e6e6e6; margin: 2rem 0 0.25rem 0; letter-spacing: 0.02em; }
       h2 small { color: #888; font-weight: 400; font-size: 0.78rem; display: block; margin-top: 0.15rem; }
       .meta { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }
+      .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0.25rem 0 0.6rem 0; font-size: 0.8rem; }
+      .ctl-label { color: #666; margin-right: 0.35rem; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.7rem; }
+      .ctl-sep { color: #333; margin: 0 0.2rem; }
+      .ctl { display: inline-block; padding: 2px 9px; border-radius: 5px; border: 1px solid #26262b;
+        background: #16161a; color: #b9c6d6; text-decoration: none; font-variant-numeric: tabular-nums; transition: background 90ms, border-color 90ms; }
+      .ctl:hover { background: #1e1e25; border-color: #3a3a44; color: #e6e6e6; }
+      .ctl.active { background: #24405f; border-color: #3f6da0; color: #eaf2ff; }
+      .ctl.live.active { background: #1c4a38; border-color: #1fa971; color: #d6ffe9; }
+      .ctl.disabled { opacity: 0.35; pointer-events: none; }
+      .ctl:focus-visible { outline: 2px solid #6bb4ff; outline-offset: 1px; }
       .domain-card { border-top: 1px solid #1a1a1d; padding: 0.65rem 0; }
       .domain-name { font-weight: 600; font-size: 0.92rem; padding-bottom: 0.25rem; }
       /* Region/operator, so a bare relay IP says WHERE it is without a lookup. */
@@ -259,11 +289,24 @@ for (const b of buckets) {
   </head>
   <body>
     <h1>yggdrasil-monitor</h1>
+    <div class="controls">
+      <span class="ctl-label">Range</span>
+      {([["1h",1],["6h",6],["24h",24],["3d",72],["7d",168],["30d",720]] as [string,number][]).map(([lbl,h]) => (
+        <a class:list={["ctl", { active: WIN_HOURS === h }]}
+           href={`?hours=${h}${IS_LIVE ? "" : `&end=${WIN_END}`}`}>{lbl}</a>
+      ))}
+      <span class="ctl-sep">·</span>
+      <a class="ctl" href={`?hours=${WIN_HOURS}&end=${WIN_START}`} title="Back one window">&larr; older</a>
+      {IS_LIVE
+        ? <span class="ctl disabled" title="Already at the latest">newer &rarr;</span>
+        : <a class="ctl" href={`?hours=${WIN_HOURS}&end=${Math.min(Date.now(), WIN_END + WIN_MS)}`} title="Forward one window">newer &rarr;</a>}
+      <a class:list={["ctl", "live", { active: IS_LIVE }]} href={`?hours=${WIN_HOURS}`} title="Jump to now + resume auto-refresh">&#8635; Live</a>
+    </div>
     <div class="meta">
-      24 h window · auto-refresh every 30 s · since {since ?? "—"} ·
-      <a href="/api/summary">/api/summary</a> ·
-      <a href="/api/probes?since=24h">/api/probes</a> ·
-      <a href="/api/timeseries?hours=24">/api/timeseries</a>
+      {spanLabel} window · {IS_LIVE ? "live · auto-refresh 30 s" : `history · ends ${fmtTimeUtc(WIN_END)}`} ·
+      <span class="num">{fmtTimeUtc(WIN_START)}</span> &rarr; <span class="num">{fmtTimeUtc(WIN_END)}</span> ·
+      <a href={`/api/summary?${qWin}`}>/api/summary</a> ·
+      <a href={`/api/timeseries?${qWin}`}>/api/timeseries</a>
     </div>
     <div class="legend">
       Sparkline: line = average latency, <span class="swatch" style="background:#d6443d;opacity:0.45"></span>red band = outage window

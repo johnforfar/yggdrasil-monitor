@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { tail } from "../../lib/store.ts";
+import { readRange, tail } from "../../lib/store.ts";
 import { ACTIVE_DOMAINS, categoryFor } from "../../lib/probe.ts";
 
 export const prerender = false;
@@ -37,12 +37,22 @@ const probeMs = (p: any): number => {
   return 0;
 };
 
-export const GET: APIRoute = async () => {
-  const sinceIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 19) + "Z";
+export const GET: APIRoute = async ({ url }) => {
+  // Window params (shared with /api/timeseries): `hours` = span (1..720),
+  // `end` = epoch ms anchoring the window ("go back in time"; omit for live now).
+  const hours = Math.max(1, Math.min(720, Number(url?.searchParams?.get("hours")) || 24));
+  const endRaw = url?.searchParams?.get("end");
+  const nowMs = endRaw ? Math.min(Date.now(), Number(endRaw) || Date.now()) : Date.now();
+  const sinceMs = nowMs - hours * 3600 * 1000;
+  const sinceIso = new Date(sinceMs).toISOString().slice(0, 19) + "Z";
+  const endIso = new Date(nowMs).toISOString().slice(0, 19) + "Z";
   type Acc = Bucket & { _msSum: number; _streakStart: string | null };
   const buckets = new Map<string, Acc>();
 
-  const probes = await tail(8 * 1024 * 1024, (p: any) => p.ts >= sinceIso && ACTIVE_DOMAINS.has(p.domain));
+  // Live window → byte-tail; explicit past `end` → full range scan.
+  const probes = endRaw
+    ? await readRange(sinceMs, nowMs, (p: any) => ACTIVE_DOMAINS.has(p.domain))
+    : await tail(8 * 1024 * 1024, (p: any) => p.ts >= sinceIso && p.ts <= endIso && ACTIVE_DOMAINS.has(p.domain));
   for (const p of probes as any[]) {
     const key = `${p.domain}::${p.layer}`;
     let b = buckets.get(key);
@@ -76,7 +86,9 @@ export const GET: APIRoute = async () => {
   const out: Bucket[] = [];
   for (const b of buckets.values()) {
     if (b._streakStart) {
-      const dur = (Date.now() - Date.parse(b._streakStart)) / 1000;
+      // Extend an open bad-streak to the WINDOW END (nowMs), not wall-clock now —
+      // matters when viewing a past window.
+      const dur = (nowMs - Date.parse(b._streakStart)) / 1000;
       if (dur > b.worst_streak_s) b.worst_streak_s = dur;
     }
     b.avg_ms = b.total > 0 ? Math.round(b._msSum / b.total) : 0;
@@ -84,5 +96,5 @@ export const GET: APIRoute = async () => {
     out.push(clean);
   }
   out.sort((a, b) => (a.current === "bad" ? -1 : 1) - (b.current === "bad" ? -1 : 1) || a.domain.localeCompare(b.domain));
-  return json({ buckets: out, since: sinceIso });
+  return json({ buckets: out, since: sinceIso, end: endIso, hours });
 };

@@ -121,7 +121,12 @@ export const GET: APIRoute = async ({ url }) => {
     const unit = m[2];
     sinceMs = unit === "m" ? n * 60 * 1000 : unit === "h" ? n * 3600 * 1000 : n * 86400 * 1000;
   }
-  const sinceIso = new Date(Date.now() - sinceMs).toISOString().slice(0, 19) + "Z";
-  const samples = await tailMetrics(8 * 1024 * 1024, (s: any) => s.ts >= sinceIso && s.node === node);
-  return json({ samples, count: samples.length, node, since: sinceIso });
+  // `end` (epoch ms) anchors the window so the load panel tracks the timeseries
+  // when navigating history; omit for a live now-window.
+  const endRaw = url.searchParams.get("end");
+  const endMs = endRaw ? Math.min(Date.now(), Number(endRaw) || Date.now()) : Date.now();
+  const sinceIso = new Date(endMs - sinceMs).toISOString().slice(0, 19) + "Z";
+  const endIso = new Date(endMs).toISOString().slice(0, 19) + "Z";
+  const samples = await tailMetrics(8 * 1024 * 1024, (s: any) => s.ts >= sinceIso && s.ts <= endIso && s.node === node);
+  return json({ samples, count: samples.length, node, since: sinceIso, end: endIso });
 };
