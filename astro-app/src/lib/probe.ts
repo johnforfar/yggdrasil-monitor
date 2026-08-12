@@ -72,6 +72,12 @@ export const DOMAINS: DomainConfig[] = [
   { name: "power.buildooors.com",    category: "yggdrasil", label: "ASIA · Own1 — own-power" },
   { name: "vesper.buildooors.com",   category: "yggdrasil", label: "ASIA · Own1 — vesper" },
   { name: "comicgen.buildooors.com", category: "yggdrasil", label: "ASIA · Own1 — comicgen" },
+  // The public/community (marketplace) names for vesper + comicgen — the SECOND
+  // row per app, same rationale as memegen: buildooors green + marketplace red =
+  // that DNS record, not Own1. The 50 s probe also keeps these names' trustless.cloud
+  // registration warm, directly fighting the ~25% CNAME flap.
+  { name: "vesper.marketplace.openxnetwork.org",   category: "yggdrasil", label: "VESPER — public/community name" },
+  { name: "comicgen.marketplace.openxnetwork.org", category: "yggdrasil", label: "COMICGEN — public/community name" },
   { name: "demo.ownx.co",             category: "direct" },
   { name: "ownx.co",                  category: "direct" },
   { name: "community.openxnetwork.org", category: "direct" }, // was openxai.org (rebrand)
@@ -224,7 +230,7 @@ export const runOnce = async (): Promise<void> => {
 
 let loopStarted = false;
 
-export const startProbeLoop = (intervalSec = 60): void => {
+export const startProbeLoop = (intervalSec = 50): void => {
   if (loopStarted) return;
   loopStarted = true;
   setTimeout(() => { void runOnce().catch(() => {}); }, 5_000);

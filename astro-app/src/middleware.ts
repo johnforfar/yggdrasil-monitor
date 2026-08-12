@@ -5,7 +5,7 @@
 import { defineMiddleware } from "astro:middleware";
 import { startProbeLoop } from "./lib/probe.ts";
 
-const INTERVAL_S = Number(process.env.YGG_MONITOR_INTERVAL_S ?? "60");
+const INTERVAL_S = Number(process.env.YGG_MONITOR_INTERVAL_S ?? "50");
 
 export const onRequest = defineMiddleware((_ctx, next) => {
   startProbeLoop(INTERVAL_S);

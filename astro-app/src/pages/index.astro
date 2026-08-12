@@ -2,7 +2,7 @@
 export const prerender = false;
 
 import { startProbeLoop, labelFor } from "../lib/probe.ts";
-startProbeLoop(Number(process.env.YGG_MONITOR_INTERVAL_S ?? "60"));
+startProbeLoop(Number(process.env.YGG_MONITOR_INTERVAL_S ?? "50"));
 
 // ── Time window (URL-driven — shareable links, browser back/forward work) ──
 // hours = span (1..720 = the 30 d on-disk retention); end = epoch ms anchoring
