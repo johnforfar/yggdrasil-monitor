@@ -244,9 +244,9 @@ for (const b of buckets) {
     <title>yggdrasil-monitor</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
-      body { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: #0e0e10; color: #e6e6e6; margin: 0; padding: 2rem; }
-      h1 { font-weight: 600; margin: 0 0 0.25rem 0; font-size: 1.25rem; }
-      h2 { font-size: 0.92rem; font-weight: 600; color: #e6e6e6; margin: 2rem 0 0.25rem 0; letter-spacing: 0.02em; }
+      body { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: #0e0e10; color: #e6e6e6; margin: 0; padding: 1.1rem 1.25rem; }
+      h1 { font-weight: 600; margin: 0 0 0.2rem 0; font-size: 1.1rem; }
+      h2 { font-size: 0.92rem; font-weight: 600; color: #e6e6e6; margin: 1rem 0 0.15rem 0; letter-spacing: 0.02em; }
       h2 small { color: #888; font-weight: 400; font-size: 0.78rem; display: block; margin-top: 0.15rem; }
       .meta { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }
       .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0.25rem 0 0.6rem 0; font-size: 0.8rem; }
@@ -259,11 +259,19 @@ for (const b of buckets) {
       .ctl.live.active { background: #1c4a38; border-color: #1fa971; color: #d6ffe9; }
       .ctl.disabled { opacity: 0.35; pointer-events: none; }
       .ctl:focus-visible { outline: 2px solid #6bb4ff; outline-offset: 1px; }
-      .domain-card { border-top: 1px solid #1a1a1d; padding: 0.65rem 0; }
+      .domain-card { border-top: 1px solid #1a1a1d; padding: 0.28rem 0; }
+      .summary { display: flex; align-items: baseline; gap: 0.5rem; cursor: pointer; padding: 0.1rem 0; }
+      .summary:hover .domain-name { color: #fff; }
+      .caret { color: #666; font-size: 0.62rem; flex: 0 0 auto; transition: transform 120ms; display: inline-block; }
+      .domain-card.expanded .caret { transform: rotate(90deg); }
+      .dots { margin-left: auto; display: flex; gap: 0.25rem; flex-wrap: wrap; justify-content: flex-end; }
+      .mini-pill { font-size: 0.6rem; padding: 1px 6px; border-radius: 999px; color: #fff; font-weight: 600; white-space: nowrap; }
+      .detail { display: none; padding: 0.1rem 0 0.25rem 1.05rem; }
+      .domain-card.expanded .detail { display: block; }
       .domain-name { font-weight: 600; font-size: 0.92rem; padding-bottom: 0.25rem; }
       /* Region/operator, so a bare relay IP says WHERE it is without a lookup. */
       .domain-label { color: #888; font-weight: 400; font-size: 0.78rem; margin-left: 0.5rem; }
-      .layer-row { display: grid; grid-template-columns: 60px 60px 100px 100px 100px 1fr; align-items: center; gap: 0.5rem; padding: 0.2rem 0; font-size: 0.8rem; }
+      .layer-row { display: grid; grid-template-columns: 60px 60px 100px 100px 100px 1fr; align-items: center; gap: 0.5rem; padding: 0.1rem 0; font-size: 0.8rem; }
       .layer { color: #888; }
       .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; color: #fff; }
       .num { font-variant-numeric: tabular-nums; }
@@ -353,10 +361,22 @@ for (const b of buckets) {
           {domains.map((d) => {
             const rows = cm.get(d)!;
             return (
-              <div class="domain-card">
-                <div class="domain-name">{d}
-                  {labelFor(d) && <span class="domain-label">{labelFor(d)}</span>}
+              <div class="domain-card collapsible">
+                <div class="summary">
+                  <span class="caret">▸</span>
+                  <span class="domain-name">{d}
+                    {labelFor(d) && <span class="domain-label">{labelFor(d)}</span>}
+                  </span>
+                  <span class="dots">
+                    {rows.map((r) => {
+                      const p = dotFor(r.current);
+                      return (
+                        <span class="mini-pill" style={`background:${p.bg}`} title={`${labelForLayer(r.layer)}: ${p.text} · ${r.ok}/${r.total} · ${r.avg_ms}ms`}>{labelForLayer(r.layer)}</span>
+                      );
+                    })}
+                  </span>
                 </div>
+                <div class="detail">
                 {rows.map((r) => {
                   const p = dotFor(r.current);
                   const ts = series[`${r.domain}::${r.layer}`] ?? [];
@@ -372,6 +392,7 @@ for (const b of buckets) {
                     </div>
                   );
                 })}
+                </div>
               </div>
             );
           })}
@@ -416,6 +437,11 @@ for (const b of buckets) {
           if (!t || !t.getAttribute || !t.getAttribute('data-tip')) hide();
         });
       })();
+      // Collapsible rows — compact summary by default, click to expand the
+      // sparkline detail (keeps the whole board on one screen without scrolling).
+      document.querySelectorAll('.domain-card.collapsible .summary').forEach((s) => {
+        s.addEventListener('click', () => s.parentElement.classList.toggle('expanded'));
+      });
     </script>
   </body>
 </html>
