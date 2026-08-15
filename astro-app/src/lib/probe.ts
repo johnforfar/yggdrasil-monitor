@@ -59,7 +59,13 @@ export const DOMAINS: DomainConfig[] = [
   // reported five times as five separate app failures.
   { name: "dns1.trustless.cloud",   category: "relay", ns_query: "201-8d88-490d-f4d4-4950-5f50-b31d-4197.yggdrasil.trustless.cloud", label: "NS · sole authority for *.yggdrasil.trustless.cloud (SPOF)" },
   { name: "92.5.225.96",            category: "relay", tcp_port: 53, label: "NS · dns1 raw IP — no PTR, not a dedicated peer" },
-  { name: "trustless.cloud",        category: "direct", label: "CONTROL · the parent zone on Cloudflare — should stay ~0%" },
+  // NO apex row for trustless.cloud: the apex has no A record (NOERROR/ANSWER:0)
+  // — the zone exists to host the delegation, nothing else. Probing it would sit
+  // permanently red for a non-fault, and permanent red trains you to ignore the
+  // board (see the buildooors removal above). The `dns` layer of
+  // dns1.trustless.cloud already IS the parent-zone control: that record lives in
+  // Cloudflare's zone as delegation glue, so if it is green while the `ns` row is
+  // red, the fault is below the delegation and not Cloudflare.
   // Removed 2026-08-07: ai / network / dashboard / desktop.buildooors.com.
   // Those containers were retired during the 2026-08-01 consolidation, so all four
   // sat at 100% bad indefinitely. Permanent red is worse than no row — it trains
