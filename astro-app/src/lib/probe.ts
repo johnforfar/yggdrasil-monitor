@@ -9,6 +9,13 @@ export interface DomainConfig {
   // For relay/raw-host targets, optionally do a TCP-port probe instead
   // of HTTPS (e.g. the yggdrasil peer TLS port).
   tcp_port?: number;
+  /**
+   * Ask THIS host (an authoritative nameserver) to resolve `ns_query`.
+   * Distinct from the `dns` layer, which asks the system resolver for a name —
+   * this asks one specific server whether it is answering at all, which is the
+   * question a delegation SPOF actually poses.
+   */
+  ns_query?: string;
   // Shown next to the name on the page. Bare IPs and bare hostnames say nothing
   // about WHERE a thing is, and "which relay just died" is the first question
   // asked during an outage.
@@ -31,6 +38,28 @@ export const DOMAINS: DomainConfig[] = [
   //   46.232.249.203 → …ultrasrv.de                   · netcup GmbH · Nuremberg, DE
   { name: "23.227.167.191",  category: "relay", tcp_port: RELAY_TLS_PORT, label: "US · Los Angeles (Hivelocity)" },
   { name: "46.232.249.203",  category: "relay", tcp_port: RELAY_TLS_PORT, label: "EU · Nuremberg (netcup)" },
+  // ── THE DELEGATION CHAIN (added 2026-08-15) ───────────────────────────────
+  // Every `yggdrasil` row below resolves through `<encoded-ygg>.yggdrasil.trustless.cloud`,
+  // and until today the board measured only the SYMPTOMS. Five domains sat at a
+  // uniform 4.4-5.1% while every `direct` control sat at ~0%, and the 08-07 writeup
+  // concluded "the ygg-CNAME path is unreliable" because the data could not say
+  // WHY. It can now.
+  //
+  // The chain, established 2026-08-15 by walking it:
+  //   trustless.cloud            → Cloudflare (hera/terry.ns.cloudflare.com) — reliable
+  //   yggdrasil.trustless.cloud  → DELEGATED, 300 s TTL, to ONE nameserver:
+  //   dns1.trustless.cloud       → 92.5.225.96 — no PTR, not either dedicated peer
+  //
+  // Measured at the time of writing: 10/10 queries unanswered while ICMP was 4/4 at
+  // 314 ms. The box is up; its DNS service is not. There is NO secondary NS, so
+  // there is nothing to fail over to — which is exactly why all five domains move
+  // together.
+  //
+  // These three rows exist so the next outage names its own cause instead of being
+  // reported five times as five separate app failures.
+  { name: "dns1.trustless.cloud",   category: "relay", ns_query: "201-8d88-490d-f4d4-4950-5f50-b31d-4197.yggdrasil.trustless.cloud", label: "NS · sole authority for *.yggdrasil.trustless.cloud (SPOF)" },
+  { name: "92.5.225.96",            category: "relay", tcp_port: 53, label: "NS · dns1 raw IP — no PTR, not a dedicated peer" },
+  { name: "trustless.cloud",        category: "direct", label: "CONTROL · the parent zone on Cloudflare — should stay ~0%" },
   // Removed 2026-08-07: ai / network / dashboard / desktop.buildooors.com.
   // Those containers were retired during the 2026-08-01 consolidation, so all four
   // sat at 100% bad indefinitely. Permanent red is worse than no row — it trains
@@ -175,6 +204,36 @@ const probeHttps = async (d: DomainConfig): Promise<void> => {
   });
 };
 
+// Authoritative-NS probe: does this nameserver answer the query the whole estate
+// depends on? Added 2026-08-15 after `yggdrasil.trustless.cloud` was found to be
+// delegated to a SINGLE server (dns1 → 92.5.225.96, no secondary) that returned
+// 0/10 while answering ICMP 4/4. Every ygg row went red together and the board
+// could not say why, because it measured only the symptoms.
+const probeNs = async (d: DomainConfig): Promise<void> => {
+  const t0 = process.hrtime.bigint();
+  let ok = false;
+  let detail = "";
+  try {
+    const { Resolver } = await import("node:dns/promises");
+    const r = new Resolver({ timeout: 4000, tries: 1 });
+    // Resolve the NS hostname to an address first: setServers needs an IP, and
+    // resolving it through the system resolver is itself part of the chain.
+    const { lookup } = await import("node:dns/promises");
+    const addr = await lookup(d.name);
+    r.setServers([addr.address]);
+    const ans = await r.resolve4(d.ns_query!);
+    ok = Array.isArray(ans) && ans.length > 0;
+    detail = ok ? ans[0] : "empty";
+  } catch (e: any) {
+    detail = String(e?.code ?? e?.message ?? "error").slice(0, 40);
+  }
+  const t1 = process.hrtime.bigint();
+  await appendLine({
+    ts: nowIso(), layer: "ns", domain: d.name, category: d.category,
+    total_s: Number((t1 - t0) / 1000000n) / 1000, ok, detail,
+  });
+};
+
 // TCP-reach probe: connect to (host, port), measure handshake time. Used for
 // the yggdrasil peer, which doesn't serve HTTPS but does answer TLS on 9003.
 const probeTcp = async (d: DomainConfig): Promise<void> => {
@@ -220,7 +279,9 @@ export const runOnce = async (): Promise<void> => {
         await probeDns(d, r.name, r.servers);
       }
     }
-    if (d.tcp_port) {
+    if (d.ns_query) {
+      await probeNs(d);
+    } else if (d.tcp_port) {
       await probeTcp(d);
     } else {
       await probeHttps(d);
