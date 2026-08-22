@@ -106,12 +106,12 @@ export const DOMAINS: DomainConfig[] = [
   // memegen — Own1's dedicated image-generation container, live 2026-08-07.
   // Same ygg-CNAME path as the demo boxes, so it inherits the same bridge risk;
   // watched from day one rather than after the first outage nobody noticed.
-  { name: "memegen.buildooors.com", category: "yggdrasil", label: "ASIA · Own1 — MEMEGEN (imagegen)" },
+  { name: "memegen.buildooors.com", app: "memegen", category: "yggdrasil", label: "ASIA · Own1 — MEMEGEN (imagegen)" },
   // The public/community name for the same app. A SECOND row on purpose: if the
   // buildooors name is green and this one is red, the fault is that DNS record,
   // not Own1 — which is exactly the distinction that took an hour to establish
   // by hand on 2026-08-07.
-  { name: "memegen.marketplace.openxnetwork.org", category: "yggdrasil", label: "MEMEGEN — public/community name" },
+  { name: "memegen.marketplace.openxnetwork.org", app: "memegen", category: "yggdrasil", label: "MEMEGEN — public/community name" },
   // The rest of Own1's public apps. Watched for their own sake, but the probe
   // doubles as a KEEPALIVE and that is measurably the bigger win: on 2026-08-12
   // the two monitored Own1 domains answered in a flat ~1.2-1.7 s while these
@@ -123,15 +123,15 @@ export const DOMAINS: DomainConfig[] = [
   // A 60 s probe from xnode-1 beats Sam's in-browser 50 s keepalive for this,
   // because it runs whether or not anyone has a page open — which is precisely
   // when a site has gone cold.
-  { name: "power.buildooors.com",    category: "yggdrasil", label: "ASIA · Own1 — own-power" },
-  { name: "vesper.buildooors.com",   category: "yggdrasil", label: "ASIA · Own1 — vesper" },
-  { name: "comicgen.buildooors.com", category: "yggdrasil", label: "ASIA · Own1 — comicgen" },
+  { name: "power.buildooors.com", app: "power",    category: "yggdrasil", label: "ASIA · Own1 — own-power" },
+  { name: "vesper.buildooors.com", app: "vesper",   category: "yggdrasil", label: "ASIA · Own1 — vesper" },
+  { name: "comicgen.buildooors.com", app: "comicgen", category: "yggdrasil", label: "ASIA · Own1 — comicgen" },
   // The public/community (marketplace) names for vesper + comicgen — the SECOND
   // row per app, same rationale as memegen: buildooors green + marketplace red =
   // that DNS record, not Own1. The 50 s probe also keeps these names' trustless.cloud
   // registration warm, directly fighting the ~25% CNAME flap.
-  { name: "vesper.marketplace.openxnetwork.org",   category: "yggdrasil", label: "VESPER — public/community name" },
-  { name: "comicgen.marketplace.openxnetwork.org", category: "yggdrasil", label: "COMICGEN — public/community name" },
+  { name: "vesper.marketplace.openxnetwork.org", app: "vesper",   category: "yggdrasil", label: "VESPER — public/community name" },
+  { name: "comicgen.marketplace.openxnetwork.org", app: "comicgen", category: "yggdrasil", label: "COMICGEN — public/community name" },
   { name: "demo.ownx.co",             category: "direct" },
   { name: "ownx.co",                  category: "direct" },
   { name: "community.openxnetwork.org", category: "direct" }, // was openxai.org (rebrand)
@@ -322,4 +322,9 @@ export const startProbeLoop = (intervalSec = 50): void => {
   setTimeout(() => { void runOnce().catch(() => {}); }, 5_000);
   setInterval(() => { void runOnce().catch(() => {}); }, intervalSec * 1000);
   console.log(`[ygg-monitor] probe loop started, interval=${intervalSec}s, targets=${DOMAINS.length}`);
-};
+};/** Which app a hostname belongs to, if it shares one with another name. */
+export function appFor(domain: string): string | undefined {
+  return DOMAINS.find((d) => d.name === domain)?.app;
+}
+
+

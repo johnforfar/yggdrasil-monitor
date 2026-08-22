@@ -1,7 +1,7 @@
 ---
 export const prerender = false;
 
-import { startProbeLoop, labelFor } from "../lib/probe.ts";
+import { startProbeLoop, labelFor, appFor } from "../lib/probe.ts";
 startProbeLoop(Number(process.env.YGG_MONITOR_INTERVAL_S ?? "50"));
 
 // ── Time window (URL-driven — shareable links, browser back/forward work) ──
@@ -143,6 +143,37 @@ const renderSparkline = (pts: TsPoint[]): string => {
 // Time axis: now-24h on the left → now on the right. Samples are placed at
 // their actual ts within that window. Gaps (push agent down) appear as gaps
 // in the line — that's correct; we don't interpolate over missing data.
+// Reconnects/hour over the window. Flat near zero is healthy; a raised plateau
+// is a flapping uplink. Drawn on the same time axis as load and the latency
+// sparklines so a flap plateau lines up visually with the HTTPS-bad bands on
+// the rows below — which is the correlation that took an afternoon by hand.
+const renderYggSparkline = (samples: HostSample[]): string => {
+  const W = 360, H = 36, PADY = 4;
+  const inWindow = (samples ?? []).filter((s) => {
+    const t = new Date(s.ts).getTime();
+    return t >= WIN_START && t <= WIN_END && s.ygg_reconnects_1h != null;
+  });
+  if (inWindow.length === 0) return "";
+  // Scale to at least 20 so a healthy box reads as a flat line near the floor
+  // rather than noise amplified to full height.
+  const maxR = Math.max(20, ...inWindow.map((s) => s.ygg_reconnects_1h as number));
+  const xFor = (t: number) => ((t - WIN_START) / WIN_MS) * W;
+  const yFor = (r: number) => PADY + (H - 2 * PADY) * (1 - Math.min(r, maxR) / maxR);
+  const bands: string[] = [];
+  const pts: string[] = [];
+  const dots: string[] = [];
+  inWindow.forEach((s) => {
+    const t = new Date(s.ts).getTime();
+    const r = s.ygg_reconnects_1h as number;
+    const x = xFor(t), y = yFor(r);
+    pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    if (r > 10) bands.push(`<rect x="${(x - 1).toFixed(1)}" y="0" width="2.5" height="${H}" fill="#d6443d" fill-opacity="0.28"></rect>`);
+    dots.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="rgba(255,177,104,0.001)" data-tip="${fmtTimeUtc(t)}\n${r} reconnects/h · ${s.ygg_peers_up ?? "?"} peers up"></circle>`);
+  });
+  const line = pts.length > 1 ? `<polyline points="${pts.join(" ")}" fill="none" stroke="#ffb168" stroke-width="1.5" pointer-events="none" />` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block; cursor: crosshair;">${bands.join("")}${line}${dots.join("")}</svg>`;
+};
+
 const renderLoadSparkline = (samples: HostSample[], nCores: number = 8): string => {
   const W = 360, H = 36, PADY = 4;
   // Selected window — same as the latency timeseries.
@@ -265,6 +296,9 @@ for (const b of buckets) {
       .ctl.disabled { opacity: 0.35; pointer-events: none; }
       .ctl:focus-visible { outline: 2px solid #6bb4ff; outline-offset: 1px; }
       /* ── Status hero ─────────────────────────────────────────────── */
+      .ygg-chip { margin-left: 0.5rem; font-size: 0.7rem; padding: 1px 7px; border-radius: 999px;
+        border: 1px solid #2c4a3a; background: #12241c; color: #7ce8b5; font-weight: 600; white-space: nowrap; }
+      .ygg-chip.flapping { border-color: #d6443d; background: #33131a; color: #ff9b93; }
       .hero { display: flex; align-items: center; gap: 0.6rem; border: 1px solid;
         border-radius: 10px; padding: 0.65rem 0.9rem; margin: 0 0 0.9rem 0; }
       .hero-dot { width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto;
@@ -292,6 +326,10 @@ for (const b of buckets) {
       .domain-name { font-weight: 600; font-size: 0.92rem; padding-bottom: 0.25rem; }
       /* Region/operator, so a bare relay IP says WHERE it is without a lookup. */
       .domain-label { color: #888; font-weight: 400; font-size: 0.78rem; margin-left: 0.5rem; }
+      /* Sub-heading inside a grouped card — one per hostname serving the app. */
+      .host-head { color: #9aa; font-size: 0.78rem; font-family: ui-monospace, monospace; margin: 0.5rem 0 0.15rem; padding-top: 0.35rem; border-top: 1px solid #1e1e1e; }
+      .host-head:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+      .diverge-chip { background: #3a2a10; color: #f0b429; border: 1px solid #6b4d12; border-radius: 3px; font-size: 0.66rem; padding: 0.05rem 0.35rem; margin-left: 0.35rem; letter-spacing: 0.02em; }
       .layer-row { display: grid; grid-template-columns: 60px 60px 100px 100px 100px 1fr; align-items: center; gap: 0.5rem; padding: 0.1rem 0; font-size: 0.8rem; }
       .layer { color: #888; }
       .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; color: #fff; }
@@ -381,6 +419,15 @@ for (const b of buckets) {
                 · swap {fmtKb(latestHostSample.swap_used_kb)} used
               </span>
             )}
+            {latestHostSample && latestHostSample.ygg_reconnects_1h != null && (
+              /* Mesh stability as seen FROM Own1 — the view xnode-1 structurally
+                 cannot have. On 2026-08-22 this read 103/h while the board showed
+                 the relays healthy, because they ARE healthy from xnode-1; it is
+                 Own1's own session to them that collapses. */
+              <span class={`ygg-chip${latestHostSample.ygg_reconnects_1h > 10 ? " flapping" : ""}`}>
+                ygg {latestHostSample.ygg_peers_up ?? "?"} peers · {latestHostSample.ygg_reconnects_1h} reconnects/h{latestHostSample.ygg_reconnects_1h > 10 ? " · FLAPPING" : ""}
+              </span>
+            )}
           </div>
           <div class="layer-row">
             <div class="layer">load</div>
@@ -390,6 +437,16 @@ for (const b of buckets) {
             <div class="num">—</div>
             <div class="spark" set:html={renderLoadSparkline(hostSamples)} />
           </div>
+          {hostSamples.some((h) => h.ygg_reconnects_1h != null) && (
+            <div class="layer-row">
+              <div class="layer">ygg</div>
+              <div><span class="pill" style={`background:${(latestHostSample?.ygg_reconnects_1h ?? 0) > 10 ? "#d6443d" : "#1fa971"}`}>{latestHostSample?.ygg_reconnects_1h ?? "—"}/h</span></div>
+              <div class="num">{latestHostSample?.ygg_peers_up ?? "—"} peers up</div>
+              <div class="num">{latestHostSample?.ygg_peer_uptime_s != null && latestHostSample.ygg_peer_uptime_s >= 0 ? fmtSec(latestHostSample.ygg_peer_uptime_s) : "—"}</div>
+              <div class="num">—</div>
+              <div class="spark" set:html={renderYggSparkline(hostSamples)} />
+            </div>
+          )}
         </div>
       </section>
     )}
@@ -409,44 +466,94 @@ for (const b of buckets) {
         const d = badness(b) - badness(a);
         return d !== 0 ? d : a.localeCompare(b);
       });
+      // Fold hostnames that serve the SAME app into one card. Both rows keep
+      // being probed and shown — if one name is green and the other red, the
+      // fault is that DNS record and not Own1, which is the whole reason the
+      // second row exists. Grouping removes the visual duplication without
+      // removing the comparison.
+      const appGroups = [];
+      const seenApp = new Map();
+      for (const dn of domains) {
+        const a = appFor(dn);
+        if (a) {
+          const at = seenApp.get(a);
+          if (at != null) { appGroups[at].hosts.push(dn); continue; }
+          seenApp.set(a, appGroups.length);
+          appGroups.push({ key: a, app: a, hosts: [dn] });
+        } else {
+          appGroups.push({ key: dn, hosts: [dn] });
+        }
+      }
       return (
         <section class={`section section-${cat}`}>
           {cat === "direct" && <div class="big-divider">Reference group — sites that don't depend on the yggdrasil relay (the rest of this page is dimmed)</div>}
           <h2>{CAT_TITLES[cat] ?? cat}<small>{CAT_NOTES[cat] ?? ""}</small></h2>
-          {domains.map((d) => {
-            const rows = cm.get(d)!;
+          {appGroups.map((g) => {
+            const hostRows = g.hosts.map((h) => ({ host: h, rows: cm.get(h)! }));
+            const anyBad = hostRows.some((h) => h.rows.some((r) => r.current === "bad"));
+            const byLayer = new Map();
+            for (const h of hostRows) {
+              for (const r of h.rows) {
+                if (!byLayer.has(r.layer)) byLayer.set(r.layer, new Set());
+                byLayer.get(r.layer)!.add(r.current);
+              }
+            }
+            // Same app, two names, one green one red = that DNS record is the
+            // fault, not Own1. Say it out loud — telling those two apart is the
+            // only reason the second name is probed at all.
+            const diverges = hostRows.length > 1 &&
+              [...byLayer.values()].some((s) => s.has("ok") && s.has("bad"));
+            const worst = (layer) => {
+              const s = byLayer.get(layer)!;
+              return s.has("bad") ? "bad" : s.has("ok") ? "ok" : [...s][0];
+            };
+            const layers = [...byLayer.keys()];
+            // A group of one is just a row — keep its hostname and its label.
+            const multi = g.hosts.length > 1;
+            const title = multi ? g.app : g.hosts[0];
             return (
-              <div class={`domain-card collapsible${rows.some((r) => r.current === "bad") ? " has-bad" : ""}`}>
+              <div class={`domain-card collapsible${anyBad ? " has-bad" : ""}`}>
                 <div class="summary">
                   <span class="caret">▸</span>
-                  <span class="domain-name">{d}
-                    {labelFor(d) && <span class="domain-label">{labelFor(d)}</span>}
+                  <span class="domain-name">{title}
+                    {multi
+                      ? <span class="domain-label">{g.hosts.length} names</span>
+                      : labelFor(title) && <span class="domain-label">{labelFor(title)}</span>}
                   </span>
                   <span class="dots">
-                    {rows.map((r) => {
-                      const p = dotFor(r.current);
+                    {layers.map((L) => {
+                      const p = dotFor(worst(L));
                       return (
-                        <span class="mini-pill" style={`background:${p.bg}`} title={`${labelForLayer(r.layer)}: ${p.text} · ${r.ok}/${r.total} · ${r.avg_ms}ms`}>{labelForLayer(r.layer)}</span>
+                        <span class="mini-pill" style={`background:${p.bg}`} title={`${labelForLayer(L)}: ${p.text}`}>{labelForLayer(L)}</span>
                       );
                     })}
+                    {diverges && <span class="diverge-chip" title="One hostname is up and another is down for the same app — suspect that DNS record, not Own1.">DNS divergence</span>}
                   </span>
                 </div>
                 <div class="detail">
-                {rows.map((r) => {
-                  const p = dotFor(r.current);
-                  const ts = series[`${r.domain}::${r.layer}`] ?? [];
-                  const svg = renderSparkline(ts);
-                  return (
-                    <div class="layer-row">
-                      <div class="layer">{labelForLayer(r.layer)}</div>
-                      <div><span class="pill" style={`background:${p.bg}`}>{p.text}</span></div>
-                      <div class="num">{r.ok}/{r.total}</div>
-                      <div class="num">{r.avg_ms} ms</div>
-                      <div class="num">{r.worst_streak_s > 0 ? fmtSec(r.worst_streak_s) : "—"}</div>
-                      <div class="spark" set:html={svg} />
-                    </div>
-                  );
-                })}
+                {hostRows.map((h) => (
+                  <Fragment>
+                    {multi && (
+                      <div class="host-head">{h.host}
+                        {labelFor(h.host) && <span class="domain-label">{labelFor(h.host)}</span>}
+                      </div>
+                    )}
+                    {h.rows.map((r) => {
+                      const p = dotFor(r.current);
+                      const svg = renderSparkline(series[`${r.domain}::${r.layer}`] ?? []);
+                      return (
+                        <div class="layer-row">
+                          <div class="layer">{labelForLayer(r.layer)}</div>
+                          <div><span class="pill" style={`background:${p.bg}`}>{p.text}</span></div>
+                          <div class="num">{r.ok}/{r.total}</div>
+                          <div class="num">{r.avg_ms} ms</div>
+                          <div class="num">{r.worst_streak_s > 0 ? fmtSec(r.worst_streak_s) : "—"}</div>
+                          <div class="spark" set:html={svg} />
+                        </div>
+                      );
+                    })}
+                  </Fragment>
+                ))}
                 </div>
               </div>
             );
