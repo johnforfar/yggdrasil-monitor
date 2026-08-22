@@ -40,7 +40,7 @@ let series: Record<string, TsPoint[]> = {};
 let since: string | null = null;
 let bucketSec: number = 600;
 let error: string | null = null;
-interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; }
+interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; ygg_peers_up: number | null; ygg_peer_uptime_s: number | null; ygg_reconnects_1h: number | null; }
 let hostSamples: HostSample[] = [];
 try {
   const sm = await import("./api/summary.ts");
@@ -190,6 +190,11 @@ const renderLoadSparkline = (samples: HostSample[], nCores: number = 8): string 
     // Per-sample invisible hit target with tooltip — hover for full sample detail.
     const memFreeGb = s.mem_avail_kb != null ? (s.mem_avail_kb / 1024 / 1024).toFixed(1) + " GB free" : "—";
     const swapGb = s.swap_used_kb != null ? (s.swap_used_kb / 1024 / 1024).toFixed(1) + " GB used" : "—";
+    // Mesh stability as seen FROM Own1 — the view xnode-1 structurally cannot have.
+    const yggTip = s.ygg_reconnects_1h == null
+      ? "ygg: not reported"
+      : `ygg: ${s.ygg_peers_up ?? "?"} peers up · ${s.ygg_reconnects_1h} reconnects/h` +
+        (s.ygg_reconnects_1h > 10 ? " · FLAPPING" : "");
     const benchState = s.bench_worker?.state ?? "—";
     const tip = `${fmtTimeUtc(t)}\nload ${s.load_1m.toFixed(2)} / ${(s.load_5m ?? 0).toFixed(2)} / ${(s.load_15m ?? 0).toFixed(2)} (1/5/15m)\nmem ${memFreeGb}\nswap ${swapGb}\nbench-worker: ${benchState}`;
     sampleDots.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="transparent" stroke="transparent"><title>${tip}</title></circle>`);
@@ -437,11 +442,48 @@ for (const b of buckets) {
           if (!t || !t.getAttribute || !t.getAttribute('data-tip')) hide();
         });
       })();
-      // Collapsible rows — compact summary by default, click to expand the
-      // sparkline detail (keeps the whole board on one screen without scrolling).
-      document.querySelectorAll('.domain-card.collapsible .summary').forEach((s) => {
-        s.addEventListener('click', () => s.parentElement.classList.toggle('expanded'));
-      });
+      // Collapsible rows — EXPANDED BY DEFAULT since 2026-08-22.
+      //
+      // They used to default closed to keep the board on one screen. That cost
+      // more than it saved: on 2026-08-22 every ygg row was failing and the
+      // sparklines — which show WHEN each one started and whether it is solid
+      // or flapping — were one click away each. The difference between "down
+      // solid for 6h" and "bad 735/1957 with a 0.1h worst streak" is the whole
+      // diagnosis, and it was hidden by default.
+      //
+      // Collapse is remembered per row in localStorage, browser-only: anyone
+      // who prefers a compact board keeps one, and it never leaves the machine.
+      (() => {
+        const KEY = 'ygg-monitor.collapsed.v1';
+        let collapsed;
+        try {
+          collapsed = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
+        } catch (e) {
+          collapsed = new Set();   // a corrupt value must not blank the board
+        }
+        const save = () => {
+          try {
+            localStorage.setItem(KEY, JSON.stringify([...collapsed]));
+          } catch (e) {
+            /* private mode / quota — the board still works, it just forgets */
+          }
+        };
+        document.querySelectorAll('.domain-card.collapsible').forEach((card) => {
+          // Identify by the row's own label, not its index: rows get added and
+          // reordered (three were renamed today), and an index-keyed preference
+          // would silently collapse the wrong row after any such change.
+          const nameEl = card.querySelector('.domain-name');
+          const id = (nameEl && nameEl.textContent ? nameEl.textContent.trim() : '');
+          if (!collapsed.has(id)) card.classList.add('expanded');
+          const sum = card.querySelector('.summary');
+          if (!sum) return;
+          sum.addEventListener('click', () => {
+            const nowExpanded = card.classList.toggle('expanded');
+            if (nowExpanded) collapsed.delete(id); else collapsed.add(id);
+            save();
+          });
+        });
+      })();
     </script>
   </body>
 </html>

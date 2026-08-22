@@ -72,7 +72,16 @@ export const prerender = false;
 // POST /api/host-metrics — ingest a sample.
 // Body: { ts: ISO8601, node: string, load_1m: number, load_5m?: number,
 //         load_15m?: number, mem_avail_kb: number, mem_total_kb: number,
-//         swap_used_kb?: number, bench_worker?: { state, runs_session, ... } }
+//         swap_used_kb?: number, bench_worker?: { state, runs_session, ... },
+//         ygg_peers_up?: number, ygg_peer_uptime_s?: number,
+//         ygg_reconnects_1h?: number }
+//
+// The ygg_* fields exist because of 2026-08-22: every ygg-routed hostname was
+// failing intermittently for hours, and nothing on the board could see why.
+// The monitor probes relays from xnode-1, where they answer fine — it cannot
+// see that OWN1's own session to the relay was collapsing. It was reconnecting
+// 103 times an hour to the only live relay. That single number is the whole
+// diagnosis, and it is only visible from the box.
 export const POST: APIRoute = async ({ request }) => {
   const expected = process.env.METRICS_INGEST_SECRET;
   if (!expected) {
@@ -104,6 +113,11 @@ export const POST: APIRoute = async ({ request }) => {
     mem_total_kb: typeof body.mem_total_kb === "number" ? body.mem_total_kb : null,
     swap_used_kb: typeof body.swap_used_kb === "number" ? body.swap_used_kb : null,
     bench_worker: body.bench_worker ?? null,
+    // Nullable, not defaulted to 0: an older pusher that omits them must read
+    // "unknown", never "healthy". A fabricated 0 reconnects is worse than a gap.
+    ygg_peers_up: typeof body.ygg_peers_up === "number" ? body.ygg_peers_up : null,
+    ygg_peer_uptime_s: typeof body.ygg_peer_uptime_s === "number" ? body.ygg_peer_uptime_s : null,
+    ygg_reconnects_1h: typeof body.ygg_reconnects_1h === "number" ? body.ygg_reconnects_1h : null,
   };
   await append(record);
   return json({ ok: true, ts: record.ts });
