@@ -264,7 +264,23 @@ for (const b of buckets) {
       .ctl.live.active { background: #1c4a38; border-color: #1fa971; color: #d6ffe9; }
       .ctl.disabled { opacity: 0.35; pointer-events: none; }
       .ctl:focus-visible { outline: 2px solid #6bb4ff; outline-offset: 1px; }
-      .domain-card { border-top: 1px solid #1a1a1d; padding: 0.28rem 0; }
+      /* ── Status hero ─────────────────────────────────────────────── */
+      .hero { display: flex; align-items: center; gap: 0.6rem; border: 1px solid;
+        border-radius: 10px; padding: 0.65rem 0.9rem; margin: 0 0 0.9rem 0; }
+      .hero-dot { width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto;
+        box-shadow: 0 0 0 3px rgba(255,255,255,0.06); }
+      .hero-text { font-weight: 700; font-size: 0.95rem; letter-spacing: 0.01em; }
+      .hero-sub { color: #9a9aa2; font-size: 0.75rem; margin-left: auto;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+      @media (max-width: 640px) { .hero-sub { display: none; } }
+
+      /* Rows: slightly more air and a real hover target. Density suits infra,
+         but every row reading identically is what hid the outage. */
+      .domain-card { border-top: 1px solid #1a1a1d; padding: 0.3rem 0; border-radius: 6px;
+        transition: background 90ms; }
+      .domain-card:hover { background: #131317; }
+      /* A failing row should be findable by eye, not by reading every pill. */
+      .domain-card.has-bad { box-shadow: inset 3px 0 0 #d6443d; padding-left: 0.5rem; }
       .summary { display: flex; align-items: baseline; gap: 0.5rem; cursor: pointer; padding: 0.1rem 0; }
       .summary:hover .domain-name { color: #fff; }
       .caret { color: #666; font-size: 0.62rem; flex: 0 0 auto; transition: transform 120ms; display: inline-block; }
@@ -301,6 +317,29 @@ for (const b of buckets) {
     </style>
   </head>
   <body>
+    {(() => {
+      // STATUS HERO. A monitoring board's first job is answering "is anything
+      // wrong" from across the room, before anyone reads a row. Every row
+      // previously carried identical weight, so six simultaneous failures
+      // looked no different from none.
+      const real = buckets.filter((b) => b.category !== "direct");
+      const bad = real.filter((b) => b.current === "bad");
+      const domsBad = [...new Set(bad.map((b) => b.domain))];
+      const state = bad.length === 0 ? "ok" : bad.length >= real.length / 2 ? "critical" : "degraded";
+      const bg = state === "ok" ? "#0f2a1e" : state === "critical" ? "#33131a" : "#33260f";
+      const bd = state === "ok" ? "#1fa971" : state === "critical" ? "#d6443d" : "#d99a2b";
+      const fg = state === "ok" ? "#7ce8b5" : state === "critical" ? "#ff9b93" : "#ffd08a";
+      const headline = state === "ok"
+        ? "All systems operational"
+        : `${domsBad.length} host${domsBad.length === 1 ? "" : "s"} affected · ${bad.length} of ${real.length} checks failing`;
+      return (
+        <div class="hero" style={`background:${bg}; border-color:${bd};`}>
+          <span class="hero-dot" style={`background:${bd};`}></span>
+          <span class="hero-text" style={`color:${fg};`}>{headline}</span>
+          <span class="hero-sub">{domsBad.slice(0, 4).join(" · ")}{domsBad.length > 4 ? ` +${domsBad.length - 4}` : ""}</span>
+        </div>
+      );
+    })()}
     <h1>yggdrasil-monitor</h1>
     <div class="controls">
       <span class="ctl-label">Range</span>
@@ -358,7 +397,18 @@ for (const b of buckets) {
     {CAT_ORDER.map((cat) => {
       const cm = grouped.get(cat);
       if (!cm || cm.size === 0) return null;
-      const domains = [...cm.keys()].sort();
+      // FAILING FIRST. Alphabetical order gives an outage and a healthy row the
+      // same prominence; on 2026-08-22 the six dead rows were scattered through
+      // the list. Worst-affected first, then name for stability.
+      const badness = (dn: string) => {
+        const rs = cm.get(dn)!;
+        const b = rs.filter((r) => r.current === "bad").length;
+        return b === 0 ? 0 : b / rs.length + 1;
+      };
+      const domains = [...cm.keys()].sort((a, b) => {
+        const d = badness(b) - badness(a);
+        return d !== 0 ? d : a.localeCompare(b);
+      });
       return (
         <section class={`section section-${cat}`}>
           {cat === "direct" && <div class="big-divider">Reference group — sites that don't depend on the yggdrasil relay (the rest of this page is dimmed)</div>}
@@ -366,7 +416,7 @@ for (const b of buckets) {
           {domains.map((d) => {
             const rows = cm.get(d)!;
             return (
-              <div class="domain-card collapsible">
+              <div class={`domain-card collapsible${rows.some((r) => r.current === "bad") ? " has-bad" : ""}`}>
                 <div class="summary">
                   <span class="caret">▸</span>
                   <span class="domain-name">{d}
