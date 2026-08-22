@@ -23,7 +23,7 @@ export interface DomainConfig {
 }
 
 // The upstream openmesh yggdrasil relay. ALL yggdrasil-routed sites depend
-// on it being reachable; if it's down, every *.demo.ownx.co box dies at once.
+// on it being reachable; if it's down, every *.own1.ownx.co box dies at once.
 // Probing both DNS resolution AND TCP reachability on the yggdrasil-peer
 // TLS port pins root cause when sites fail.
 const RELAY_HOST = "peer.yggdrasil.openmesh.cloud";
@@ -37,6 +37,14 @@ export const DOMAINS: DomainConfig[] = [
   //   23.227.167.191 → 23-227-167-191.static.hvvc.us  · Hivelocity · Los Angeles, US
   //   46.232.249.203 → …ultrasrv.de                   · netcup GmbH · Nuremberg, DE
   { name: "23.227.167.191",  category: "relay", tcp_port: RELAY_TLS_PORT, label: "US · Los Angeles (Hivelocity)" },
+  // DNS layer on the US relay, added 2026-08-22. On the day this was added the
+  // TLS port (9003) and port 53 were BOTH dead on this host while the EU relay
+  // was fine — and the boxes resolve via different relays, so one relay dying
+  // takes down some boxes and not others. Probing only :9003 says "peer down";
+  // probing :53 too says "and name resolution through it is gone", which is the
+  // half that actually breaks the public URLs.
+  { name: "23.227.167.191",  category: "relay", tcp_port: 53, label: "US · Los Angeles — DNS :53" },
+  { name: "46.232.249.203",  category: "relay", tcp_port: 53, label: "EU · Nuremberg — DNS :53" },
   { name: "46.232.249.203",  category: "relay", tcp_port: RELAY_TLS_PORT, label: "EU · Nuremberg (netcup)" },
   // ── THE DELEGATION CHAIN (added 2026-08-15) ───────────────────────────────
   // Every `yggdrasil` row below resolves through `<encoded-ygg>.yggdrasil.trustless.cloud`,
@@ -58,6 +66,15 @@ export const DOMAINS: DomainConfig[] = [
   // These three rows exist so the next outage names its own cause instead of being
   // reported five times as five separate app failures.
   { name: "dns1.trustless.cloud",   category: "relay", ns_query: "201-8d88-490d-f4d4-4950-5f50-b31d-4197.yggdrasil.trustless.cloud", label: "NS · sole authority for *.yggdrasil.trustless.cloud (SPOF)" },
+  // PER-BOX bridge probes, added 2026-08-22 after an outage this single query
+  // could not characterise. dns1 was UP and reachable on :53, and answered
+  // normally for ashton — while returning NOTHING for john and sam and SERVFAIL
+  // for its own zone SOA. So the bridge does not fail as a unit: it can lose
+  // INDIVIDUAL records. One query against one address cannot see that, and the
+  // difference matters enormously — "the bridge is down" and "the bridge has
+  // forgotten two of three boxes" have completely different responses.
+  { name: "dns1.trustless.cloud", category: "relay", ns_query: "201-a2c1-2181-3b48-57eb-1f8d-9f34-4a23.yggdrasil.trustless.cloud", label: "NS · bridge record for SAM's box" },
+  { name: "dns1.trustless.cloud", category: "relay", ns_query: "202-2366-5684-ad56-573b-512c-7fe4-6041.yggdrasil.trustless.cloud", label: "NS · bridge record for ASHTON's box" },
   { name: "92.5.225.96",            category: "relay", tcp_port: 53, label: "NS · dns1 raw IP — no PTR, not a dedicated peer" },
   // NO apex row for trustless.cloud: the apex has no A record (NOERROR/ANSWER:0)
   // — the zone exists to host the delegation, nothing else. Probing it would sit
@@ -76,12 +93,14 @@ export const DOMAINS: DomainConfig[] = [
   // The three demo boxes sit in different regions and resolve to DIFFERENT relays
   // (john → 23.227.167.191 US, sam → 46.232.249.203 EU), which is why the
   // per-relay probes above matter: a one-relay outage takes down one box, not all.
-  { name: "john.demo.ownx.co",   category: "yggdrasil", label: "ASIA · Own1 (Johnny)" },
-  { name: "sam.demo.ownx.co",    category: "yggdrasil", label: "EU · Sam" },
-  // Ashton's box (ME) is listed on demo.ownx.co but has NO DNS record yet, so this
-  // WILL read down until one is created. That is deliberate — a red row is a
-  // standing reminder the record is missing, which a silent omission would not be.
-  { name: "ashton.demo.ownx.co", category: "yggdrasil", label: "ME · Ashton — DNS record not created yet" },
+  // Renamed 2026-08-22: demo.ownx.co → own1.ownx.co. The three boxes moved on
+  // 2026-08-21 and these rows had been probing hostnames that no longer exist,
+  // so they read red for a non-fault and would have masked the real outage that
+  // arrived the next morning. Ashton's record now EXISTS (it did not in August),
+  // so the old "no DNS record yet" note is gone with it.
+  { name: "john.own1.ownx.co",   category: "yggdrasil", label: "ASIA · Own1 (Johnny)" },
+  { name: "sam.own1.ownx.co",    category: "yggdrasil", label: "EU · Sam" },
+  { name: "ashton.own1.ownx.co", category: "yggdrasil", label: "ME · Ashton" },
   // The demo index itself. Vercel-hosted, so it is a `direct` control: if this is
   // green while the three boxes are red, the fault is the ygg path, not the site.
   // memegen — Own1's dedicated image-generation container, live 2026-08-07.
