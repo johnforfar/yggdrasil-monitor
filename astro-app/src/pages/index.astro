@@ -40,7 +40,7 @@ let series: Record<string, TsPoint[]> = {};
 let since: string | null = null;
 let bucketSec: number = 600;
 let error: string | null = null;
-interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; ygg_peers_up: number | null; ygg_peer_uptime_s: number | null; ygg_reconnects_1h: number | null; }
+interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; ygg_peers_up: number | null; ygg_peer_uptime_s: number | null; ygg_reconnects_1h: number | null; image_512_ok: boolean | null; image_structure: number | null; image_sd: number | null; image_probe_age_s: number | null; }
 let hostSamples: HostSample[] = [];
 try {
   const sm = await import("./api/summary.ts");
@@ -147,6 +147,39 @@ const renderSparkline = (pts: TsPoint[]): string => {
 // is a flapping uplink. Drawn on the same time axis as load and the latency
 // sparklines so a flap plateau lines up visually with the HTTPS-bad bands on
 // the rows below — which is the correlation that took an afternoon by hand.
+// Image-health history. This is a PASS/FAIL band, not a line: the underlying
+// measurement is "did a 512x512 generation come back as a picture or as noise",
+// and there is no meaningful middle. Green where the box could make an image,
+// red where it could not, grey where nobody asked.
+//
+// Same time axis as load and ygg so a degradation lines up against whatever
+// else was happening. On 2026-08-23 the box went bad at 9h uptime and served
+// six paid corrupt generations before a human noticed — this row is so that
+// never needs a human again.
+const renderImageSparkline = (samples: HostSample[]): string => {
+  const W = 360, H = 36;
+  const pts = (samples ?? []).filter((s) => {
+    const t = new Date(s.ts).getTime();
+    return t >= WIN_START && t <= WIN_END && s.image_512_ok != null;
+  });
+  if (pts.length === 0) return "";
+  const xFor = (t: number) => ((t - WIN_START) / WIN_MS) * W;
+  // One band per sample, widened to the gap so sparse hourly data stays visible.
+  const bands = pts.map((p, i) => {
+    const t = new Date(p.ts).getTime();
+    const next = i + 1 < pts.length ? new Date(pts[i + 1].ts).getTime() : Math.min(t + 3600_000, WIN_END);
+    const x = xFor(t), w = Math.max(1.5, xFor(next) - x);
+    const stale = (p.image_probe_age_s ?? 0) > 7200;
+    const fill = stale ? "#7a7a7a" : p.image_512_ok ? "#1fa971" : "#d6443d";
+    const tip = `${fmtTimeUtc(t)}\n512x512 ${p.image_512_ok ? "OK" : "CORRUPT"}` +
+      `${p.image_structure != null ? `\nstructure ${p.image_structure}` : ""}` +
+      `${p.image_sd != null ? ` · sd ${p.image_sd}` : ""}` +
+      `${stale ? "\n(probe stale)" : ""}`;
+    return `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="${H}" fill="${fill}" fill-opacity="0.85" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block; cursor: crosshair;">${bands.join("")}</svg>`;
+};
+
 const renderYggSparkline = (samples: HostSample[]): string => {
   const W = 360, H = 36, PADY = 4;
   const inWindow = (samples ?? []).filter((s) => {
@@ -424,6 +457,14 @@ for (const b of buckets) {
                  cannot have. On 2026-08-22 this read 103/h while the board showed
                  the relays healthy, because they ARE healthy from xnode-1; it is
                  Own1's own session to them that collapses. */
+              <span class={`ygg-chip${latestHostSample.image_512_ok === false ? " flapping" : ""}`}
+                    title="One 512x512 generation per hour, scored for GPU corruption. The failure is silent — HTTP 200 with a valid PNG full of noise — so this is the only thing that can see it.">
+                {latestHostSample.image_512_ok == null
+                  ? "image 512 · unknown"
+                  : latestHostSample.image_512_ok
+                    ? "image 512 OK"
+                    : "image 512 CORRUPT"}
+              </span>
               <span class={`ygg-chip${latestHostSample.ygg_reconnects_1h > 10 ? " flapping" : ""}`}>
                 ygg {latestHostSample.ygg_peers_up ?? "?"} peers · {latestHostSample.ygg_reconnects_1h} reconnects/h{latestHostSample.ygg_reconnects_1h > 10 ? " · FLAPPING" : ""}
               </span>
@@ -437,6 +478,16 @@ for (const b of buckets) {
             <div class="num">—</div>
             <div class="spark" set:html={renderLoadSparkline(hostSamples)} />
           </div>
+          {hostSamples.some((h) => h.image_512_ok != null) && (
+            <div class="layer-row">
+              <div class="layer">image</div>
+              <div><span class="pill" style={`background:${latestHostSample?.image_512_ok === false ? "#d6443d" : latestHostSample?.image_512_ok ? "#1fa971" : "#7a7a7a"}`}>{latestHostSample?.image_512_ok === false ? "BAD" : latestHostSample?.image_512_ok ? "OK" : "—"}</span></div>
+              <div class="num">512×512</div>
+              <div class="num">sd {latestHostSample?.image_sd ?? "—"}</div>
+              <div class="num">{latestHostSample?.image_probe_age_s != null ? `${fmtSec(latestHostSample.image_probe_age_s)} ago` : "—"}</div>
+              <div class="spark" set:html={renderImageSparkline(hostSamples)} />
+            </div>
+          )}
           {hostSamples.some((h) => h.ygg_reconnects_1h != null) && (
             <div class="layer-row">
               <div class="layer">ygg</div>

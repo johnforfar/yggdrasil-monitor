@@ -74,7 +74,9 @@ export const prerender = false;
 //         load_15m?: number, mem_avail_kb: number, mem_total_kb: number,
 //         swap_used_kb?: number, bench_worker?: { state, runs_session, ... },
 //         ygg_peers_up?: number, ygg_peer_uptime_s?: number,
-//         ygg_reconnects_1h?: number }
+//         ygg_reconnects_1h?: number,
+//         image_512_ok?: boolean, image_structure?: number,
+//         image_sd?: number, image_probe_age_s?: number }
 //
 // The ygg_* fields exist because of 2026-08-22: every ygg-routed hostname was
 // failing intermittently for hours, and nothing on the board could see why.
@@ -118,6 +120,18 @@ export const POST: APIRoute = async ({ request }) => {
     ygg_peers_up: typeof body.ygg_peers_up === "number" ? body.ygg_peers_up : null,
     ygg_peer_uptime_s: typeof body.ygg_peer_uptime_s === "number" ? body.ygg_peer_uptime_s : null,
     ygg_reconnects_1h: typeof body.ygg_reconnects_1h === "number" ? body.ygg_reconnects_1h : null,
+    // GPU image health. The box generates one 512x512 an hour and scores it;
+    // this is that verdict. It exists because the failure is SILENT — HTTP 200,
+    // a valid PNG of the right size, and noise for pixels — so no probe of an
+    // endpoint or a process can see it. Only looking at the image can.
+    // Nullable for the same reason as the ygg fields: an older pusher must read
+    // "unknown", never "healthy".
+    image_512_ok: typeof body.image_512_ok === "boolean" ? body.image_512_ok : null,
+    image_structure: typeof body.image_structure === "number" ? body.image_structure : null,
+    image_sd: typeof body.image_sd === "number" ? body.image_sd : null,
+    // Age of the underlying probe. A probe that stopped running is not a
+    // healthy box, and without this a stale "good" looks identical to a live one.
+    image_probe_age_s: typeof body.image_probe_age_s === "number" ? body.image_probe_age_s : null,
   };
   await append(record);
   return json({ ok: true, ts: record.ts });
