@@ -173,14 +173,31 @@ const renderEventStrip = (samples: HostSample[]): string => {
   const xFor = (t: number) => ((t - WIN_START) / WIN_MS) * W;
   const marks: string[] = [];
 
-  // Image failures — thin red ticks, one per failing probe.
+  // Every probe gets a tick: green for a real image, red for corrupt. Plotting
+  // BOTH matters — a gap in green is itself a signal (the probe stopped, or the
+  // box was down), and you cannot see a gap in a series that only marks
+  // failures. Successes are short and semi-transparent so failures still read
+  // first at a glance.
+  const seen = new Set<string>();
   for (const p of inWin) {
-    if (p.image_512_ok !== false) continue;
-    const x = xFor(new Date(p.ts).getTime());
-    const tip = `${fmtTimeUtc(new Date(p.ts).getTime())}\n512x512 CORRUPT` +
+    if (p.image_512_ok == null) continue;
+    // The push runs every 60s and republishes the same hourly probe verdict;
+    // dedupe on the probe's own age so one probe is one tick, not sixty.
+    const t = new Date(p.ts).getTime();
+    const probeAt = t - (p.image_probe_age_s ?? 0) * 1000;
+    const key = `${Math.round(probeAt / 60000)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const x = xFor(probeAt);
+    if (x < 0 || x > W) continue;
+    const bad = p.image_512_ok === false;
+    const tip = `${fmtTimeUtc(probeAt)}\n512x512 ${bad ? "CORRUPT" : "OK"}` +
       `${p.image_sd != null ? `\nsd ${p.image_sd} (healthy 40-70)` : ""}` +
+      `${p.image_structure != null ? ` · structure ${p.image_structure}` : ""}` +
       `${p.uptime_s != null ? `\nuptime ${fmtSec(p.uptime_s)}` : ""}`;
-    marks.push(`<rect x="${(x - 0.75).toFixed(2)}" y="10" width="1.5" height="${H - 10}" fill="#d6443d" fill-opacity="0.85" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`);
+    marks.push(bad
+      ? `<rect x="${(x - 0.9).toFixed(2)}" y="8" width="1.8" height="${H - 8}" fill="#d6443d" fill-opacity="0.9" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`
+      : `<rect x="${(x - 0.6).toFixed(2)}" y="20" width="1.2" height="${H - 20}" fill="#1fa971" fill-opacity="0.7" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`);
   }
 
   // Reboots — uptime_s went backwards.
