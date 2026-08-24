@@ -277,6 +277,9 @@ const renderLoadSparkline = (samples: HostSample[], nCores: number = 8): string 
 };
 
 const latestHostSample: HostSample | null = hostSamples.length > 0 ? hostSamples[hostSamples.length - 1] : null;
+// Hoisted rather than inlined: the Astro compiler will not parse optional
+// chaining inside a class={`...${}`} attribute.
+const imageCorrupt: boolean = latestHostSample != null && latestHostSample.image_512_ok === false;
 const fmtKb = (kb: number | null): string => {
   if (kb === null || kb === undefined) return "—";
   if (kb < 1024) return `${kb} KB`;
@@ -332,6 +335,29 @@ for (const b of buckets) {
       .ygg-chip { margin-left: 0.5rem; font-size: 0.7rem; padding: 1px 7px; border-radius: 999px;
         border: 1px solid #2c4a3a; background: #12241c; color: #7ce8b5; font-weight: 600; white-space: nowrap; }
       .ygg-chip.flapping { border-color: #d6443d; background: #33131a; color: #ff9b93; }
+
+      /* GPU producing corrupt images — deliberately NOT red.
+         Red already means "endpoint is down" everywhere else on this board, and
+         this failure is the opposite: every endpoint is up, every check passes,
+         HTTP 200 with a valid PNG, and the pixels are garbage. It needs its own
+         colour or it reads as just another outage. Purple, and the whole card
+         is washed so it cannot be missed at a glance from across the room —
+         which is the failure mode that actually happened: it was corrupt for
+         six hours and nobody looked. */
+      .section-host.image-corrupt { position: relative; }
+      .section-host.image-corrupt::before {
+        content: ""; position: absolute; inset: -0.4rem -0.6rem; border-radius: 12px;
+        background: linear-gradient(180deg, rgba(139,92,246,0.20), rgba(139,92,246,0.09));
+        border: 1px solid rgba(167,139,250,0.55); pointer-events: none; z-index: 0;
+      }
+      .section-host.image-corrupt > * { position: relative; z-index: 1; }
+      .domain-card.image-corrupt-card { border-left: 3px solid #a78bfa; padding-left: 0.6rem; }
+      .ygg-chip.image-bad { border-color: #a78bfa; background: #2a1b4d; color: #d6c7ff; }
+      .image-corrupt-banner {
+        display: block; margin: 0.35rem 0 0.5rem; padding: 0.3rem 0.6rem; border-radius: 6px;
+        background: rgba(139,92,246,0.16); border: 1px solid rgba(167,139,250,0.45);
+        color: #d6c7ff; font-size: 0.72rem; letter-spacing: 0.01em;
+      }
       .hero { display: flex; align-items: center; gap: 0.6rem; border: 1px solid;
         border-radius: 10px; padding: 0.65rem 0.9rem; margin: 0 0 0.9rem 0; }
       .hero-dot { width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto;
@@ -439,11 +465,11 @@ for (const b of buckets) {
     {error && <div class="err">Summary fetch error: {error}</div>}
 
     {hostSamples.length > 0 && (
-      <section class="section section-host">
+      <section class={imageCorrupt ? "section section-host image-corrupt" : "section section-host"}>
         <h2 style="color:#ffb168;">Own1 host metrics
           <small>Pushed every ~60 s from Own1. Orange line = 1m load avg over 24h. Dashed = overcommit threshold (load &gt; #cores). Red tinted zone above the threshold is when yggdrasil keepalives start to starve.</small>
         </h2>
-        <div class="domain-card">
+        <div class={imageCorrupt ? "domain-card image-corrupt-card" : "domain-card"}>
           <div class="domain-name">own1
             {latestHostSample && (
               <span style="color:#888; font-weight:400; font-size:0.78rem; margin-left:0.5rem;">
@@ -457,7 +483,7 @@ for (const b of buckets) {
                  cannot have. On 2026-08-22 this read 103/h while the board showed
                  the relays healthy, because they ARE healthy from xnode-1; it is
                  Own1's own session to them that collapses. */
-              <span class={`ygg-chip${latestHostSample.image_512_ok === false ? " flapping" : ""}`}
+              <span class={imageCorrupt ? "ygg-chip image-bad" : "ygg-chip"}
                     title="One 512x512 generation per hour, scored for GPU corruption. The failure is silent — HTTP 200 with a valid PNG full of noise — so this is the only thing that can see it.">
                 {latestHostSample.image_512_ok == null
                   ? "image 512 · unknown"
@@ -478,6 +504,14 @@ for (const b of buckets) {
             <div class="num">—</div>
             <div class="spark" set:html={renderLoadSparkline(hostSamples)} />
           </div>
+          {imageCorrupt && (
+            <div class="image-corrupt-banner">
+              GPU is returning corrupt images — 512×512 generations come back as
+              noise with HTTP 200 and a valid PNG, so every other check on this
+              board still reads green. memegen and comicgen "square" are affected.
+              A reboot restores it.
+            </div>
+          )}
           {hostSamples.some((h) => h.image_512_ok != null) && (
             <div class="layer-row">
               <div class="layer">image</div>
