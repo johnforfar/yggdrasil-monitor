@@ -115,6 +115,10 @@ export const POST: APIRoute = async ({ request }) => {
     mem_total_kb: typeof body.mem_total_kb === "number" ? body.mem_total_kb : null,
     swap_used_kb: typeof body.swap_used_kb === "number" ? body.swap_used_kb : null,
     bench_worker: body.bench_worker ?? null,
+    // Host uptime. Reboots are derived from this going backwards — the box does
+    // not report "I rebooted", and a restart is the single most useful event to
+    // see next to a health timeline on this hardware.
+    uptime_s: typeof body.uptime_s === "number" ? body.uptime_s : null,
     // Nullable, not defaulted to 0: an older pusher that omits them must read
     // "unknown", never "healthy". A fabricated 0 reconnects is worse than a gap.
     ygg_peers_up: typeof body.ygg_peers_up === "number" ? body.ygg_peers_up : null,

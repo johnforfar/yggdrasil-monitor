@@ -40,7 +40,7 @@ let series: Record<string, TsPoint[]> = {};
 let since: string | null = null;
 let bucketSec: number = 600;
 let error: string | null = null;
-interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; ygg_peers_up: number | null; ygg_peer_uptime_s: number | null; ygg_reconnects_1h: number | null; image_512_ok: boolean | null; image_structure: number | null; image_sd: number | null; image_probe_age_s: number | null; }
+interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; uptime_s: number | null; ygg_peers_up: number | null; ygg_peer_uptime_s: number | null; ygg_reconnects_1h: number | null; image_512_ok: boolean | null; image_structure: number | null; image_sd: number | null; image_probe_age_s: number | null; }
 let hostSamples: HostSample[] = [];
 try {
   const sm = await import("./api/summary.ts");
@@ -156,6 +156,49 @@ const renderSparkline = (pts: TsPoint[]): string => {
 // else was happening. On 2026-08-23 the box went bad at 9h uptime and served
 // six paid corrupt generations before a human noticed — this row is so that
 // never needs a human again.
+// Events strip: reboots and image failures on the shared time axis.
+//
+// Reboots are DERIVED, not reported: uptime_s going backwards between two
+// consecutive samples is a restart, and the previous sample's uptime is how
+// long the box had been up when it went down. That pairing is the whole value
+// — "corrupt after 9h, rebooted, clean again" is the shape of this bug, and it
+// is invisible if you only plot health.
+const renderEventStrip = (samples: HostSample[]): string => {
+  const W = 360, H = 36;
+  const inWin = (samples ?? []).filter((s) => {
+    const t = new Date(s.ts).getTime();
+    return t >= WIN_START && t <= WIN_END;
+  });
+  if (inWin.length === 0) return "";
+  const xFor = (t: number) => ((t - WIN_START) / WIN_MS) * W;
+  const marks: string[] = [];
+
+  // Image failures — thin red ticks, one per failing probe.
+  for (const p of inWin) {
+    if (p.image_512_ok !== false) continue;
+    const x = xFor(new Date(p.ts).getTime());
+    const tip = `${fmtTimeUtc(new Date(p.ts).getTime())}\n512x512 CORRUPT` +
+      `${p.image_sd != null ? `\nsd ${p.image_sd} (healthy 40-70)` : ""}` +
+      `${p.uptime_s != null ? `\nuptime ${fmtSec(p.uptime_s)}` : ""}`;
+    marks.push(`<rect x="${(x - 0.75).toFixed(2)}" y="10" width="1.5" height="${H - 10}" fill="#d6443d" fill-opacity="0.85" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`);
+  }
+
+  // Reboots — uptime_s went backwards.
+  for (let i = 1; i < inWin.length; i++) {
+    const prev = inWin[i - 1], cur = inWin[i];
+    if (prev.uptime_s == null || cur.uptime_s == null) continue;
+    if (cur.uptime_s >= prev.uptime_s) continue;
+    const t = new Date(cur.ts).getTime();
+    const x = xFor(t);
+    const tip = `REBOOT\n${fmtTimeUtc(t)}\nprevious uptime ${fmtSec(prev.uptime_s)}`;
+    marks.push(
+      `<rect x="${(x - 1).toFixed(2)}" y="0" width="2" height="${H}" fill="#6bb4ff" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>` +
+      `<circle cx="${x.toFixed(2)}" cy="5" r="4" fill="#6bb4ff" data-tip="${tip.replace(/"/g, "&quot;")}"></circle>`);
+  }
+  if (marks.length === 0) return "";
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block; cursor: crosshair;">${marks.join("")}</svg>`;
+};
+
 const renderImageSparkline = (samples: HostSample[]): string => {
   const W = 360, H = 36;
   const pts = (samples ?? []).filter((s) => {
@@ -510,6 +553,16 @@ for (const b of buckets) {
               noise with HTTP 200 and a valid PNG, so every other check on this
               board still reads green. memegen and comicgen "square" are affected.
               A reboot restores it.
+            </div>
+          )}
+          {hostSamples.length > 1 && (
+            <div class="layer-row">
+              <div class="layer">events</div>
+              <div><span class="pill" style="background:#6bb4ff">{(() => { let n = 0; for (let i = 1; i < hostSamples.length; i++) { const a = hostSamples[i - 1].uptime_s, b = hostSamples[i].uptime_s; if (a != null && b != null && b < a) n++; } return n; })()}</span></div>
+              <div class="num">reboots</div>
+              <div class="num">{hostSamples.filter((h) => h.image_512_ok === false).length} bad gens</div>
+              <div class="num">{latestHostSample?.uptime_s != null ? `up ${fmtSec(latestHostSample.uptime_s)}` : "—"}</div>
+              <div class="spark" set:html={renderEventStrip(hostSamples)} />
             </div>
           )}
           {hostSamples.some((h) => h.image_512_ok != null) && (
