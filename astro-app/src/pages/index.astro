@@ -59,7 +59,7 @@ try {
 
   // Own1 host-metrics push samples (24 h window). Used for the correlation
   // panel — operator wants to see "load 64 spike at HH:MM" lined up against
-  // "HTTPS bad at HH:MM" for john.demo.ownx.co.
+  // "HTTPS bad at HH:MM" for john.own1.ownx.co.
   const hm = await import("./api/host-metrics.ts");
   const hUrl = `${Astro.url.origin}/api/host-metrics?node=own1&since=${WIN_HOURS}h${IS_LIVE ? "" : `&end=${WIN_END}`}`;
   const hRes = await hm.GET({ request: new Request(hUrl), url: new URL(hUrl) } as any);

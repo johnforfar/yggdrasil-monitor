@@ -101,8 +101,6 @@ export const DOMAINS: DomainConfig[] = [
   { name: "john.own1.ownx.co",   category: "yggdrasil", label: "ASIA · Own1 (Johnny)" },
   { name: "sam.own1.ownx.co",    category: "yggdrasil", label: "EU · Sam" },
   { name: "ashton.own1.ownx.co", category: "yggdrasil", label: "ME · Ashton" },
-  // The demo index itself. Vercel-hosted, so it is a `direct` control: if this is
-  // green while the three boxes are red, the fault is the ygg path, not the site.
   // memegen — Own1's dedicated image-generation container, live 2026-08-07.
   // Same ygg-CNAME path as the demo boxes, so it inherits the same bridge risk;
   // watched from day one rather than after the first outage nobody noticed.
@@ -132,7 +130,8 @@ export const DOMAINS: DomainConfig[] = [
   // registration warm, directly fighting the ~25% CNAME flap.
   { name: "vesper.marketplace.openxnetwork.org", app: "vesper",   category: "yggdrasil", label: "VESPER — public/community name" },
   { name: "comicgen.marketplace.openxnetwork.org", app: "comicgen", category: "yggdrasil", label: "COMICGEN — public/community name" },
-  { name: "demo.ownx.co",             category: "direct" },
+  // demo.ownx.co retired 2026-08-22 (boxes moved to *.own1.ownx.co, already
+  // probed above). *.demo.ownx.co is no longer used — do not re-add.
   { name: "ownx.co",                  category: "direct" },
   { name: "community.openxnetwork.org", category: "direct" }, // was openxai.org (rebrand)
   { name: "openxnetwork.org",         category: "direct" },   // was openxai.org (rebrand)
