@@ -130,6 +130,10 @@ export const DOMAINS: DomainConfig[] = [
   // registration warm, directly fighting the ~25% CNAME flap.
   { name: "vesper.marketplace.openxnetwork.org", app: "vesper",   category: "yggdrasil", label: "VESPER — public/community name" },
   { name: "comicgen.marketplace.openxnetwork.org", app: "comicgen", category: "yggdrasil", label: "COMICGEN — public/community name" },
+  // Added 2026-10-08: live on Own1 but never probed.
+  { name: "beats.marketplace.openxnetwork.org", app: "beats", category: "yggdrasil", label: "BEATS — public/community name" },
+  { name: "openx-coupons.buildooors.com", app: "coupons", category: "yggdrasil", label: "ASIA · Own1 — openx-coupons" },
+  { name: "nexy.john.own1.ownx.co", app: "nexy", category: "yggdrasil", label: "ASIA · Own1 — Nexy (demo)" },
   // demo.ownx.co retired 2026-08-22 (boxes moved to *.own1.ownx.co, already
   // probed above). *.demo.ownx.co is no longer used — do not re-add.
   { name: "ownx.co",                  category: "direct" },
@@ -217,7 +221,9 @@ const probeHttps = async (d: DomainConfig): Promise<void> => {
     const resp = await fetch(`https://${d.name}`, { signal: ctl.signal, redirect: "manual" });
     clearTimeout(timer);
     http_code = resp.status;
-    ok = true;
+    // Any answer used to count as up, so a crashed app behind nginx (502) showed green.
+    // Redirects (login pages) and 4xx are still up; 5xx is down.
+    ok = resp.status < 500;
   } catch { /* ok stays false */ }
   const t1 = process.hrtime.bigint();
   const total_s = Number((t1 - t0) / 1000000n) / 1000;
