@@ -69,6 +69,17 @@ const tailMetrics = async (maxBytes: number, predicate?: (o: any) => boolean): P
 
 export const prerender = false;
 
+const MESH_KEYS = ["wan", "us_ip", "eu_ip", "us_ygg", "eu_ygg"] as const;
+const cleanMesh = (m: any): Record<string, { loss: number; rtt: number | null }> | null => {
+  if (!m || typeof m !== "object") return null;
+  const out: Record<string, { loss: number; rtt: number | null }> = {};
+  for (const k of MESH_KEYS) {
+    const v = m[k];
+    if (v && typeof v.loss === "number") out[k] = { loss: v.loss, rtt: typeof v.rtt === "number" ? v.rtt : null };
+  }
+  return Object.keys(out).length ? out : null;
+};
+
 // POST /api/host-metrics — ingest a sample.
 // Body: { ts: ISO8601, node: string, load_1m: number, load_5m?: number,
 //         load_15m?: number, mem_avail_kb: number, mem_total_kb: number,
@@ -136,6 +147,11 @@ export const POST: APIRoute = async ({ request }) => {
     // Age of the underlying probe. A probe that stopped running is not a
     // healthy box, and without this a stale "good" looks identical to a live one.
     image_probe_age_s: typeof body.image_probe_age_s === "number" ? body.image_probe_age_s : null,
+    // The path as seen from the box (2026-10-24): loss % and avg rtt of five pings to
+    // the internet (wan), each relay's public IP (us_ip, eu_ip) and each relay's ygg
+    // address (us_ygg, eu_ygg). Clean IPs with a lossy ygg row = the ygg session, not
+    // the ISP. Only known keys and numbers survive; anything else is dropped.
+    mesh: cleanMesh(body.mesh),
   };
   await append(record);
   return json({ ok: true, ts: record.ts });

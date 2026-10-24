@@ -40,7 +40,7 @@ let series: Record<string, TsPoint[]> = {};
 let since: string | null = null;
 let bucketSec: number = 600;
 let error: string | null = null;
-interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; uptime_s: number | null; ygg_peers_up: number | null; ygg_peer_uptime_s: number | null; ygg_reconnects_1h: number | null; image_512_ok: boolean | null; image_structure: number | null; image_sd: number | null; image_probe_age_s: number | null; }
+interface HostSample { ts: string; node: string; load_1m: number; load_5m: number | null; load_15m: number | null; mem_avail_kb: number | null; mem_total_kb: number | null; swap_used_kb: number | null; bench_worker: any; uptime_s: number | null; ygg_peers_up: number | null; ygg_peer_uptime_s: number | null; ygg_reconnects_1h: number | null; image_512_ok: boolean | null; image_structure: number | null; image_sd: number | null; image_probe_age_s: number | null; mesh?: Record<string, { loss: number; rtt: number | null }> | null; }
 let hostSamples: HostSample[] = [];
 try {
   const sm = await import("./api/summary.ts");
@@ -248,6 +248,38 @@ const renderImageSparkline = (samples: HostSample[]): string => {
     return `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="${H}" fill="${fill}" fill-opacity="0.85" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block; cursor: crosshair;">${bands.join("")}</svg>`;
+};
+
+// The path from the box, one band per column: grey = no reading, green = clean,
+// amber = the internet itself is losing packets (ISP), red = the internet path to the
+// relay is clean but the ygg session to it is losing >=60% (the session, not the ISP).
+const meshState = (m: HostSample["mesh"]): number => {
+  if (!m) return -1;
+  const wanBad = (m.wan?.loss ?? 0) >= 60 || (m.us_ip?.loss ?? 0) >= 60;
+  if (wanBad) return 1;
+  const yggBad = (m.us_ygg?.loss ?? 0) >= 60 || (m.eu_ygg?.loss ?? 0) >= 60;
+  return yggBad ? 2 : 0;
+};
+const renderMeshStrip = (samples: HostSample[]): string => {
+  const W = 360, H = 36;
+  const cols: { st: number; s: HostSample }[] = [];
+  for (const s of samples ?? []) {
+    const t = new Date(s.ts).getTime();
+    if (t < WIN_START || t > WIN_END || !s.mesh) continue;
+    const i = Math.min(COLS - 1, Math.floor(((t - WIN_START) / WIN_MS) * COLS));
+    const st = meshState(s.mesh);
+    if (!cols[i] || st > cols[i].st) cols[i] = { st, s };
+  }
+  const fill = ["#1fa971", "#e0a23a", "#d6443d"];
+  const rects = cols.map((c, i) => {
+    if (!c) return "";
+    const m = c.s.mesh!;
+    const f = (k: string) => (m[k] ? `${m[k].loss}%${m[k].rtt != null ? ` ${Math.round(m[k].rtt!)}ms` : ""}` : "—");
+    const tip = `${fmtTimeUtc(new Date(c.s.ts).getTime())}\ninternet ${f("wan")}\nLA relay: internet ${f("us_ip")} · ygg ${f("us_ygg")}\nEU relay: internet ${f("eu_ip")} · ygg ${f("eu_ygg")}`;
+    return `<rect x="${((i / COLS) * W).toFixed(2)}" y="0" width="${(W / COLS + 0.2).toFixed(2)}" height="${H}" fill="${fill[c.st]}" fill-opacity="${c.st ? 0.85 : 0.45}" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`;
+  });
+  if (!cols.some(Boolean)) return "";
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block; cursor: crosshair;">${rects.join("")}</svg>`;
 };
 
 // One sample per pixel column (the worst one, so a spike survives). A 7 d window held
@@ -627,6 +659,20 @@ for (const b of buckets) {
               <div class="spark" set:html={renderYggSparkline(worstPerColumn(hostSamples, "ygg_reconnects_1h"))} />
             </div>
           )}
+          {hostSamples.some((h) => h.mesh) && (() => {
+            const m = [...hostSamples].reverse().find((h) => h.mesh)?.mesh ?? {};
+            const st = meshState(m);
+            return (
+              <div class="layer-row" title="Pings from the box: internet, each relay's public IP, each relay's ygg address. Red = internet clean but the ygg session losing packets.">
+                <div class="layer">path</div>
+                <div><span class="pill" style={`background:${["#1fa971", "#e0a23a", "#d6443d"][Math.max(0, st)]}`}>{st === 2 ? "YGG" : st === 1 ? "ISP" : "OK"}</span></div>
+                <div class="num">LA ygg {m.us_ygg ? `${m.us_ygg.loss}%` : "—"}</div>
+                <div class="num">EU ygg {m.eu_ygg ? `${m.eu_ygg.loss}%` : "—"}</div>
+                <div class="num">net {m.wan ? `${m.wan.loss}%` : "—"}</div>
+                <div class="spark" set:html={renderMeshStrip(hostSamples)} />
+              </div>
+            );
+          })()}
         </div>
       </section>
     )}
