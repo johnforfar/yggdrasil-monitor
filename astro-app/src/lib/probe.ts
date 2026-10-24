@@ -321,7 +321,7 @@ const probeTcp = async (d: DomainConfig): Promise<void> => {
 
 // Five pings across the mesh: loss and round trip. The NixOS ping wrapper carries
 // the raw-socket capability; a bare `ping` is the fallback outside NixOS.
-const PING = ["/run/wrappers/bin/ping", "ping"];
+const PING = [process.env.YGG_MONITOR_PING, "/run/wrappers/bin/ping", "ping"].filter((p): p is string => !!p);
 const ping6 = (bin: string, addr: string): Promise<string> =>
   new Promise((resolve, reject) =>
     execFile(bin, ["-6", "-n", "-c", "5", "-i", "0.4", "-W", "3", addr], { timeout: 15_000 }, (err, stdout) => {
@@ -336,6 +336,8 @@ const probePing = async (d: DomainConfig): Promise<void> => {
     try { out = await ping6(bin, d.name); error = ""; break; }
     catch (e) { error = String((e as Error).message ?? e).slice(0, 120); }
   }
+  // no ping to run is "could not test", not "down": record nothing rather than red
+  if (!out) { console.error(`[ygg-monitor] ping ${d.name} could not run: ${error}`); return; }
   const m = /(\d+) packets transmitted, (\d+) received/.exec(out);
   const sent = m ? Number(m[1]) : 0, got = m ? Number(m[2]) : 0;
   const rtt = /= [\d.]+\/([\d.]+)\//.exec(out);

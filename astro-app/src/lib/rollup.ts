@@ -52,6 +52,8 @@ const add = (r: Ring, ts: number, ms: number, bad: boolean) => {
 export const ingest = (p: any): void => {
   const ts = Date.parse(p?.ts);
   if (!Number.isFinite(ts) || !p.domain || !p.layer) return;
+  // a ping that never ran (no binary in the first deploy) tested nothing
+  if (p.layer === "ping" && p.error && !p.sent) return;
   if (ts < Date.now() - 30 * 86400_000) return;
   const key = `${p.domain}::${p.layer}`;
   let s = series.get(key);
@@ -130,10 +132,10 @@ export const summary = (since: number, end: number, live: boolean, keep: (key: s
 };
 
 // ── snapshot: the rings as raw bytes, plus the raw-file offset they cover ──
-const snapPath = (raw: string) => raw.replace(/\.jsonl$/, "") + ".rollup-v1.bin";
+const snapPath = (raw: string) => raw.replace(/\.jsonl$/, "") + ".rollup-v2.bin";
 
 const saveSnapshot = async (raw: string): Promise<void> => {
-  const head = Buffer.from(JSON.stringify({ v: 1, offset: ingestedBytes, keys: [...series.keys()], last: [...series.values()].map((s) => [s.lastTs, s.lastBad]) }));
+  const head = Buffer.from(JSON.stringify({ v: 2, offset: ingestedBytes, keys: [...series.keys()], last: [...series.values()].map((s) => [s.lastTs, s.lastBad]) }));
   const parts: Buffer[] = [Buffer.alloc(4), head];
   parts[0].writeUInt32LE(head.length);
   for (const s of series.values()) for (const r of [s.fine, s.coarse]) for (const a of [r.epoch, r.n, r.bad, r.sum]) parts.push(Buffer.from(a.buffer, a.byteOffset, a.byteLength));
@@ -147,7 +149,7 @@ const loadSnapshot = async (raw: string): Promise<number | null> => {
   const buf = await readFile(snapPath(raw));
   const len = buf.readUInt32LE(0);
   const head = JSON.parse(buf.subarray(4, 4 + len).toString());
-  if (head.v !== 1) return null;
+  if (head.v !== 2) return null;
   let off = 4 + len;
   const take = <T extends Int32Array | Uint16Array | Float32Array>(Ctor: { new (n: number): T; BYTES_PER_ELEMENT: number }, n: number): T => {
     const a = new Ctor(n);

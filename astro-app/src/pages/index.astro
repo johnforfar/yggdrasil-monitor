@@ -191,6 +191,11 @@ const renderEventStrip = (samples: HostSample[]): string => {
     const x = xFor(probeAt);
     if (x < 0 || x > W) continue;
     const bad = p.image_512_ok === false;
+    // one tick per pixel column and state: a week of minutely verdicts is otherwise
+    // thousands of overlapping marks
+    const col = `${bad ? "b" : "g"}${Math.floor(x)}`;
+    if (seen.has(col)) continue;
+    seen.add(col);
     const tip = `${fmtTimeUtc(probeAt)}\n512x512 ${bad ? "CORRUPT" : "OK"}` +
       `${p.image_sd != null ? `\nsd ${p.image_sd} (healthy 40-70)` : ""}` +
       `${p.image_structure != null ? ` · structure ${p.image_structure}` : ""}` +
@@ -224,20 +229,40 @@ const renderImageSparkline = (samples: HostSample[]): string => {
   });
   if (pts.length === 0) return "";
   const xFor = (t: number) => ((t - WIN_START) / WIN_MS) * W;
-  // One band per sample, widened to the gap so sparse hourly data stays visible.
-  const bands = pts.map((p, i) => {
-    const t = new Date(p.ts).getTime();
-    const next = i + 1 < pts.length ? new Date(pts[i + 1].ts).getTime() : Math.min(t + 3600_000, WIN_END);
+  // One band per RUN of the same state (it used to be one per sample: ~10k rects a week),
+  // widened to the next run so sparse hourly data stays visible.
+  const state = (p: HostSample) => ((p.image_probe_age_s ?? 0) > 7200 ? "stale" : p.image_512_ok ? "ok" : "bad");
+  const runs: { from: number; p: HostSample; st: string }[] = [];
+  for (const p of pts) {
+    const st = state(p);
+    if (!runs.length || runs[runs.length - 1].st !== st) runs.push({ from: new Date(p.ts).getTime(), p, st });
+  }
+  const bands = runs.map((r, i) => {
+    const t = r.from, p = r.p;
+    const next = i + 1 < runs.length ? runs[i + 1].from : Math.min(new Date(pts[pts.length - 1].ts).getTime() + 3600_000, WIN_END);
     const x = xFor(t), w = Math.max(1.5, xFor(next) - x);
-    const stale = (p.image_probe_age_s ?? 0) > 7200;
-    const fill = stale ? "#7a7a7a" : p.image_512_ok ? "#1fa971" : "#d6443d";
-    const tip = `${fmtTimeUtc(t)}\n512x512 ${p.image_512_ok ? "OK" : "CORRUPT"}` +
+    const fill = r.st === "stale" ? "#7a7a7a" : r.st === "ok" ? "#1fa971" : "#d6443d";
+    const tip = `${fmtTimeUtc(t)} → ${fmtTimeUtc(next)}\n512x512 ${r.st === "ok" ? "OK" : r.st === "bad" ? "CORRUPT" : "probe stale"}` +
       `${p.image_structure != null ? `\nstructure ${p.image_structure}` : ""}` +
-      `${p.image_sd != null ? ` · sd ${p.image_sd}` : ""}` +
-      `${stale ? "\n(probe stale)" : ""}`;
+      `${p.image_sd != null ? ` · sd ${p.image_sd}` : ""}`;
     return `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="${H}" fill="${fill}" fill-opacity="0.85" data-tip="${tip.replace(/"/g, "&quot;")}"></rect>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" style="display:block; cursor: crosshair;">${bands.join("")}</svg>`;
+};
+
+// One sample per pixel column (the worst one, so a spike survives). A 7 d window held
+// ~10k samples, each drawn with its own tooltip: a 5 MB page that took 7 s to load.
+const COLS = 360;
+const worstPerColumn = (samples: HostSample[], field: keyof HostSample): HostSample[] => {
+  const cols: (HostSample | undefined)[] = new Array(COLS);
+  for (const s of samples ?? []) {
+    const t = new Date(s.ts).getTime();
+    if (t < WIN_START || t > WIN_END) continue;
+    const i = Math.min(COLS - 1, Math.floor(((t - WIN_START) / WIN_MS) * COLS));
+    const v = Number(s[field] ?? -Infinity), cur = cols[i];
+    if (!cur || v > Number(cur[field] ?? -Infinity)) cols[i] = s;
+  }
+  return cols.filter((s): s is HostSample => !!s);
 };
 
 const renderYggSparkline = (samples: HostSample[]): string => {
@@ -299,7 +324,7 @@ const renderLoadSparkline = (samples: HostSample[], nCores: number = 8): string 
 
   // Render polyline. Gaps > 5 min split into separate polylines so we don't
   // draw misleading straight lines across long outages.
-  const GAP_MS = 5 * 60 * 1000;
+  const GAP_MS = Math.max(5 * 60 * 1000, 2.5 * (WIN_MS / COLS));
   const segments: string[][] = [[]];
   let prevMs: number | null = null;
   const sampleDots: string[] = [];
@@ -562,7 +587,7 @@ for (const b of buckets) {
             <div class="num">{hostSamples.length} samples</div>
             <div class="num">—</div>
             <div class="num">—</div>
-            <div class="spark" set:html={renderLoadSparkline(hostSamples)} />
+            <div class="spark" set:html={renderLoadSparkline(worstPerColumn(hostSamples, "load_1m"))} />
           </div>
           {imageCorrupt && (
             <div class="image-corrupt-banner">
@@ -599,7 +624,7 @@ for (const b of buckets) {
               <div class="num">{latestHostSample?.ygg_peers_up ?? "—"} peers up</div>
               <div class="num">{latestHostSample?.ygg_peer_uptime_s != null && latestHostSample.ygg_peer_uptime_s >= 0 ? fmtSec(latestHostSample.ygg_peer_uptime_s) : "—"}</div>
               <div class="num">—</div>
-              <div class="spark" set:html={renderYggSparkline(hostSamples)} />
+              <div class="spark" set:html={renderYggSparkline(worstPerColumn(hostSamples, "ygg_reconnects_1h"))} />
             </div>
           )}
         </div>

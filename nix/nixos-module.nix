@@ -19,6 +19,8 @@ in {
       YGG_MONITOR_JSONL = "/var/lib/yggdrasil-monitor/probes.jsonl";
       YGG_MONITOR_METRICS_JSONL = "/var/lib/yggdrasil-monitor/host-metrics.jsonl";
       YGG_MONITOR_INTERVAL_S = "60";
+      # the mesh pings (probe.ts): this container has no ping wrapper of its own
+      YGG_MONITOR_PING = "${pkgs.iputils}/bin/ping";
     };
     serviceConfig = {
       ExecStart = "${lib.getExe yggdrasil-monitor}";
@@ -30,6 +32,9 @@ in {
       # Load operator-set secrets (om app env set) — leading `-` makes the
       # file optional so first-deploy without secrets still boots.
       EnvironmentFile = "-/xnode-config/env";
+      # ICMP for those pings and nothing else
+      AmbientCapabilities = [ "CAP_NET_RAW" ];
+      CapabilityBoundingSet = [ "CAP_NET_RAW" ];
     };
   };
 
