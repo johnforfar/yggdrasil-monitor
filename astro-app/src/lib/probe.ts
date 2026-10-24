@@ -1,4 +1,5 @@
 import { promises as dnsPromises } from "node:dns";
+import { execFile } from "node:child_process";
 import { appendLine } from "./store.ts";
 
 export type Category = "relay" | "yggdrasil" | "direct";
@@ -20,6 +21,16 @@ export interface DomainConfig {
   // about WHERE a thing is, and "which relay just died" is the first question
   // asked during an outage.
   label?: string;
+  /**
+   * Ping this address over Yggdrasil instead of HTTPS. Added 2026-10-24: the relays
+   * answered :9003 over the open internet at 100% through two long outages of
+   * john.own1.ownx.co, while the box's own log showed its relay links "up" and the
+   * probes that did arrive all got 200. So the missing signal is whether packets
+   * actually cross the mesh. Pinging each relay's and each box's ygg address from
+   * here separates "relay unreachable over ygg" from "relay fine, the hop to the box
+   * is not" from "box fine, HTTPS/DNS is not".
+   */
+  ping?: boolean;
 }
 
 // The upstream openmesh yggdrasil relay. ALL yggdrasil-routed sites depend
@@ -98,6 +109,16 @@ export const DOMAINS: DomainConfig[] = [
   // so they read red for a non-fault and would have masked the real outage that
   // arrived the next morning. Ashton's record now EXISTS (it did not in August),
   // so the old "no DNS record yet" note is gone with it.
+  // ── OVER THE MESH (added 2026-10-24) ─────────────────────────────────────
+  // Pings across Yggdrasil from this box, one per relay and per Own1. Read them
+  // against the HTTPS rows: relay green + box red = the relay→box hop; box green +
+  // HTTPS red = DNS/nginx, not the mesh.
+  { name: "200:c213:71c3:426:41b:6f39:3215:e744", category: "relay", ping: true, label: "US · Los Angeles relay — over ygg" },
+  { name: "201:91f:3458:fea0:e501:9b76:8d77:9a76", category: "relay", ping: true, label: "EU · Nuremberg relay — over ygg" },
+  { name: "201:8d88:490d:f4d4:4950:5f50:b31d:4197", category: "yggdrasil", ping: true, label: "ASIA · Own1 (Johnny) — demo container, over ygg" },
+  { name: "206:727d:50d8:51c:5de:af8c:78df:a815", category: "yggdrasil", ping: true, label: "ASIA · Own1 (Johnny) — host, over ygg" },
+  { name: "201:a2c1:2181:3b48:57eb:1f8d:9f34:4a23", category: "yggdrasil", ping: true, label: "EU · Sam — over ygg" },
+  { name: "202:2366:5684:ad56:573b:512c:7fe4:6041", category: "yggdrasil", ping: true, label: "ME · Ashton — over ygg" },
   { name: "john.own1.ownx.co",   category: "yggdrasil", label: "ASIA · Own1 (Johnny)" },
   { name: "sam.own1.ownx.co",    category: "yggdrasil", label: "EU · Sam" },
   { name: "ashton.own1.ownx.co", category: "yggdrasil", label: "ME · Ashton" },
@@ -298,12 +319,42 @@ const probeTcp = async (d: DomainConfig): Promise<void> => {
   });
 };
 
+// Five pings across the mesh: loss and round trip. The NixOS ping wrapper carries
+// the raw-socket capability; a bare `ping` is the fallback outside NixOS.
+const PING = ["/run/wrappers/bin/ping", "ping"];
+const ping6 = (bin: string, addr: string): Promise<string> =>
+  new Promise((resolve, reject) =>
+    execFile(bin, ["-6", "-n", "-c", "5", "-i", "0.4", "-W", "3", addr], { timeout: 15_000 }, (err, stdout) => {
+      // ping exits 1 when no reply came back, which is a result, not an error
+      if (err && !stdout) reject(err); else resolve(String(stdout));
+    }));
+
+const probePing = async (d: DomainConfig): Promise<void> => {
+  let out = "";
+  let error = "";
+  for (const bin of PING) {
+    try { out = await ping6(bin, d.name); error = ""; break; }
+    catch (e) { error = String((e as Error).message ?? e).slice(0, 120); }
+  }
+  const m = /(\d+) packets transmitted, (\d+) received/.exec(out);
+  const sent = m ? Number(m[1]) : 0, got = m ? Number(m[2]) : 0;
+  const rtt = /= [\d.]+\/([\d.]+)\//.exec(out);
+  await appendLine({
+    ts: nowIso(), layer: "ping", domain: d.name, category: d.category,
+    sent, received: got, loss_pct: sent ? Math.round((1 - got / sent) * 100) : 100,
+    rtt_ms: rtt ? Number(rtt[1]) : null, ok: got > 0, ...(error ? { error } : {}),
+  });
+};
+
 // A raw IPv4/IPv6 literal — DNS resolution doesn't apply, so skip the DNS layer
 // (otherwise every per-IP relay probe records a spurious "empty" DNS failure).
 const isRawIp = (s: string): boolean => /^\d{1,3}(\.\d{1,3}){3}$/.test(s) || s.includes(":");
 
 export const runOnce = async (): Promise<void> => {
+  // the mesh pings together, so they see the same moment and add ~3 s, not ~20
+  await Promise.all(DOMAINS.filter((d) => d.ping).map((d) => probePing(d).catch((e) => console.error("[ygg-monitor] ping", d.name, e))));
   for (const d of DOMAINS) {
+    if (d.ping) continue;
     if (!isRawIp(d.name)) {
       for (const r of RESOLVERS) {
         await probeDns(d, r.name, r.servers);

@@ -1,6 +1,8 @@
-import { appendFile, open, readFile, stat } from "node:fs/promises";
-import { existsSync, mkdirSync } from "node:fs";
+import { appendFile, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { createReadStream, createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { createInterface } from "node:readline";
+import { ingest, noteAppended, setIngested, startRollup } from "./rollup.ts";
 
 const DEFAULT_PATH = process.env.YGG_MONITOR_JSONL ?? "/var/lib/yggdrasil-monitor/probes.jsonl";
 
@@ -19,14 +21,72 @@ const ensure = () => {
 export const setPath = (p: string) => { path = p; ensured = false; };
 export const getPath = () => path;
 
+// Appends wait behind a prune, so no probe lands in the file being replaced.
+let gate: Promise<void> = Promise.resolve();
+
 export const appendLine = async (obj: unknown): Promise<void> => {
   ensure();
+  const line = JSON.stringify(obj) + "\n";
+  await gate;
   try {
-    await appendFile(path, JSON.stringify(obj) + "\n", "utf-8");
+    await appendFile(path, line, "utf-8");
+    ingest(obj);
+    noteAppended(Buffer.byteLength(line));
   } catch (e) {
     // Don't crash the server on a write failure; just log and move on.
     console.error("[ygg-monitor] append failed:", e);
   }
+};
+
+const RETAIN_DAYS = Number(process.env.YGG_MONITOR_RETAIN_DAYS ?? "30");
+
+/**
+ * Drop raw probes older than the retention window, streaming (never the whole file
+ * in memory). Daily. The file had grown without bound since August.
+ */
+export const prune = async (): Promise<void> => {
+  if (!existsSync(path)) return;
+  let release!: () => void;
+  const prev = gate;
+  gate = new Promise((r) => { release = r; });
+  await prev;
+  try {
+    const cutoff = new Date(Date.now() - RETAIN_DAYS * 86400_000).toISOString().slice(0, 19) + "Z";
+    const tmp = path + ".prune";
+    const out = createWriteStream(tmp);
+    const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
+    let kept = 0, dropped = 0;
+    for await (const line of rl) {
+      // ts is the first field written, so a prefix read avoids parsing every line
+      const ts = /"ts":"([^"]+)"/.exec(line.slice(0, 40))?.[1];
+      // a line without a leading ts is kept: dropping what we cannot date loses data
+      if (!line || (ts !== undefined && ts < cutoff)) { dropped++; continue; }
+      if (!out.write(line + "\n")) await new Promise((r) => out.once("drain", r));
+      kept++;
+    }
+    await new Promise<void>((r, j) => out.end((e?: Error) => (e ? j(e) : r())));
+    if (dropped) {
+      await rename(tmp, path);
+      setIngested((await stat(path)).size);
+      console.log(`[ygg-monitor] pruned ${dropped} probes older than ${RETAIN_DAYS} d; kept ${kept}`);
+    } else {
+      await rm(tmp, { force: true });
+    }
+  } catch (e) {
+    console.error("[ygg-monitor] prune failed:", e);
+  } finally {
+    release();
+  }
+};
+
+let started = false;
+/** Build the rollups from the raw file once, then prune daily. */
+export const startStore = (): void => {
+  if (started) return;
+  started = true;
+  ensure();
+  void startRollup(path).then(() => prune()).catch((e) => console.error("[ygg-monitor] rollup start failed:", e));
+  setInterval(() => { void prune(); }, 86400_000).unref();
 };
 
 // Read the tail of the JSONL file (last maxBytes). Returns parsed objects

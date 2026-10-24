@@ -4,10 +4,12 @@
 // to the `loopStarted` flag inside probe.ts.
 import { defineMiddleware } from "astro:middleware";
 import { startProbeLoop } from "./lib/probe.ts";
+import { startStore } from "./lib/store.ts";
 
 const INTERVAL_S = Number(process.env.YGG_MONITOR_INTERVAL_S ?? "50");
 
 export const onRequest = defineMiddleware((_ctx, next) => {
+  startStore();
   startProbeLoop(INTERVAL_S);
   return next();
 });

@@ -82,7 +82,7 @@ const dotFor = (c: string) =>
   { bg: "#7a7a7a", text: "—" };
 
 const labelForLayer = (l: string): string =>
-  l === "dns" ? "DNS" : l === "https" ? "HTTPS" : l === "tcp" ? "TCP" : l;
+  l === "dns" ? "DNS" : l === "https" ? "HTTPS" : l === "tcp" ? "TCP" : l === "ping" ? "PING" : l;
 
 const fmtTimeUtc = (ms: number): string => {
   const d = new Date(ms);
