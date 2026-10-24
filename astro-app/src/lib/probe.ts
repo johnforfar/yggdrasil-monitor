@@ -331,11 +331,12 @@ const ping6 = (bin: string, addr: string): Promise<string> =>
 
 const probePing = async (d: DomainConfig): Promise<void> => {
   let out = "";
-  let error = "";
+  const errors: string[] = [];
   for (const bin of PING) {
-    try { out = await ping6(bin, d.name); error = ""; break; }
-    catch (e) { error = String((e as Error).message ?? e).slice(0, 120); }
+    try { out = await ping6(bin, d.name); break; }
+    catch (e) { errors.push(`${bin}: ${String((e as Error).message ?? e).slice(0, 100)}`); }
   }
+  const error = out ? "" : errors.join("; ");
   // no ping to run is "could not test", not "down": record nothing rather than red
   if (!out) { console.error(`[ygg-monitor] ping ${d.name} could not run: ${error}`); return; }
   const m = /(\d+) packets transmitted, (\d+) received/.exec(out);

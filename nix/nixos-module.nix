@@ -12,6 +12,8 @@ in {
     description = "yggdrasil-monitor — DNS + HTTPS probes (in-process)";
     wantedBy = [ "multi-user.target" ];
     after = [ "network.target" ];
+    # ping for the mesh probes, on PATH as well as by YGG_MONITOR_PING
+    path = [ pkgs.iputils ];
     environment = {
       HOST = "0.0.0.0";
       PORT = "8080";
