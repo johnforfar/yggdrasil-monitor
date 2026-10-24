@@ -109,16 +109,12 @@ export const DOMAINS: DomainConfig[] = [
   // so they read red for a non-fault and would have masked the real outage that
   // arrived the next morning. Ashton's record now EXISTS (it did not in August),
   // so the old "no DNS record yet" note is gone with it.
-  // ── OVER THE MESH (added 2026-10-24) ─────────────────────────────────────
-  // Pings across Yggdrasil from this box, one per relay and per Own1. Read them
-  // against the HTTPS rows: relay green + box red = the relay→box hop; box green +
-  // HTTPS red = DNS/nginx, not the mesh.
-  { name: "200:c213:71c3:426:41b:6f39:3215:e744", category: "relay", ping: true, label: "US · Los Angeles relay — over ygg" },
-  { name: "201:91f:3458:fea0:e501:9b76:8d77:9a76", category: "relay", ping: true, label: "EU · Nuremberg relay — over ygg" },
-  { name: "201:8d88:490d:f4d4:4950:5f50:b31d:4197", category: "yggdrasil", ping: true, label: "ASIA · Own1 (Johnny) — demo container, over ygg" },
-  { name: "206:727d:50d8:51c:5de:af8c:78df:a815", category: "yggdrasil", ping: true, label: "ASIA · Own1 (Johnny) — host, over ygg" },
-  { name: "201:a2c1:2181:3b48:57eb:1f8d:9f34:4a23", category: "yggdrasil", ping: true, label: "EU · Sam — over ygg" },
-  { name: "202:2366:5684:ad56:573b:512c:7fe4:6041", category: "yggdrasil", ping: true, label: "ME · Ashton — over ygg" },
+  // ── OVER THE MESH: NOT FROM HERE (tried 2026-10-24) ─────────────────────
+  // This container has no route into 200::/7 ("connect: Network is unreachable"), so
+  // it cannot ping a ygg address. Its path to every Own1 is public internet → a
+  // relay's HTTPS bridge → ygg → the box (Own1's nginx sees these requests from the
+  // LA relay's address). Mesh pings have to run where ygg is: on the Own1 itself,
+  // box → each relay, in own1-metrics-push. probePing stays for a vantage that has ygg.
   { name: "john.own1.ownx.co",   category: "yggdrasil", label: "ASIA · Own1 (Johnny)" },
   { name: "sam.own1.ownx.co",    category: "yggdrasil", label: "EU · Sam" },
   { name: "ashton.own1.ownx.co", category: "yggdrasil", label: "ME · Ashton" },
