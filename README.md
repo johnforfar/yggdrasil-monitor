@@ -14,6 +14,15 @@ Probes DNS + HTTPS every 60 s and stores per-probe results as JSON Lines on disk
 
 Each probe records: timestamp, layer, domain, took_ms, outcome, optional answer string. CNAME chains that dead-end at an unresolved yggdrasil-encoded subdomain are tagged `result: "cname_only"` so outage attribution is unambiguous.
 
+## Reading history: rollups
+
+The APIs never re-read the raw file:
+- `astro-app/src/lib/rollup.ts` keeps per-series bins: 60 s for 48 h, 300 s for 30 d.
+- Memory is fixed, about 10 MB.
+- They are updated as each probe is appended and snapshotted to `probes.rollup-v2.bin` every 5 min.
+- On first start the raw file is streamed once (about 640 MB in 18 s on xnode-1). A restart replays only the bytes after the snapshot.
+- Raw probes older than 30 days are pruned daily, by streaming (`YGG_MONITOR_RETAIN_DAYS`).
+
 ## Storage
 
 JSON Lines at `/var/lib/yggdrasil-monitor/probes.jsonl`. Append-only. Single Node process (probe loop + HTTP server in the same Astro standalone server) — no separate timer needed.
@@ -22,9 +31,11 @@ JSON Lines at `/var/lib/yggdrasil-monitor/probes.jsonl`. Append-only. Single Nod
 
 - `GET /` — current bucket summary (HTML status page)
 - `GET /api/probes?since=24h&domain=example.com&layer=dns` — recent raw probes
-- `GET /api/summary` — last-24 h bucket per (domain, layer): current status, ok/bad counts, worst contiguous bad-streak, avg latency
+- `GET /api/summary?hours=1..720[&end=ms]` — per (domain, layer) over the window: current status, ok/bad counts, worst outage (whole bins), avg latency. From the rollups
 - `GET /api/timeseries?hours=24` — bucketed series behind the sparklines
-- `GET /api/host-metrics` — Own1 load / memory / swap, pushed in by `own1-metrics-push.service`
+- `GET /api/host-metrics` — Own1 load / memory / swap / ygg reconnects / image canary / `mesh` (box→internet and box→relay pings, over the internet and over ygg), pushed in by `own1-metrics-push.service`. It is shown as the Own1 panel's `path` row: amber = ISP loss, red = the ygg session losing ≥60% while the internet is clean.
+
+Note: this container has no route into ygg (`200::/7` unreachable); its HTTPS probes reach Own1s through a relay's HTTPS bridge. Mesh pings run on the box, not here.
 
 ## Configuration
 
